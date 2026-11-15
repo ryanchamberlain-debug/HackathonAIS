@@ -10,6 +10,7 @@ import { money, uid } from "@/lib/format";
 import { estimatePayout, MIN_BET, multiplier } from "@/lib/parimutuel";
 import { usePlayer, useNow } from "@/lib/net";
 import type { CardKind, GameState, Side } from "@/lib/types";
+import { JoinBox } from "./JoinBox";
 import { Avatar, Countdown, KindBadge, Logo, OddsBar, PHASE_LABEL, PnL, PositionLine, PriceChart } from "./ui";
 
 export default function PlayerApp() {
@@ -26,9 +27,11 @@ export default function PlayerApp() {
   });
   if (!/^[A-Z0-9]{4,6}$/.test(code)) {
     return (
-      <div className="p-8 text-center">
-        <p>That room code doesn&apos;t look right.</p>
-        <Link href="/" className="text-gold underline">Back to the lobby</Link>
+      <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-4 px-4">
+        <Logo />
+        <h1 className="mt-4 font-display text-4xl tracking-wide">JOIN A ROOM</h1>
+        <p className="text-muted">{code ? `There's no room "${code}". ` : ""}Type the code shown on the host&apos;s screen.</p>
+        <JoinBox />
       </div>
     );
   }

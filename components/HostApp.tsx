@@ -10,6 +10,7 @@ import { MAX_PLAYERS, addPlayer, advance, createGame, endGameNow, playAgain, pla
 import { money, roomCode, uid } from "@/lib/format";
 import { connectBackend, liveAvailable, loadRoom, netMode, openTransport, useHost, useNow, type Transport } from "@/lib/net";
 import type { GameState } from "@/lib/types";
+import { JoinOverlay } from "./JoinQR";
 import { Avatar, Countdown, KindBadge, Leaderboard, Logo, PHASE_LABEL, PnL, PriceChart, Stamp, Sticker, Ticker, TradeFeed, TugOfWar } from "./ui";
 
 export default function HostApp() {
@@ -50,6 +51,7 @@ export default function HostApp() {
 
 function HostScreen({ initial, transport }: { initial: GameState; transport: Transport }) {
   const { state: s, commit } = useHost(initial, transport);
+  const [showQR, setShowQR] = useState(false);
   const now = useNow();
   const mode = netMode();
   const joinUrl = `${window.location.origin}/play?code=${s.code}${mode === "local" && liveAvailable ? "&local=1" : ""}`;
@@ -103,7 +105,9 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
               </button>
             </>
           )}
-          {s.phase !== "lobby" && <QRCodeSVG value={joinUrl} size={44} bgColor="#0B1015" fgColor="#E8EEF2" />}
+          <button onClick={() => setShowQR(true)} className="flex items-center gap-2 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-card" aria-label="Show the join QR code full screen">
+            <QRCodeSVG value={joinUrl} size={28} bgColor="#0B1015" fgColor="#E8EEF2" /> Join QR
+          </button>
         </div>
       </header>
 
@@ -242,6 +246,7 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
           </motion.div>
         </AnimatePresence>
       </main>
+      {showQR && <JoinOverlay url={joinUrl} code={s.code} onClose={() => setShowQR(false)} />}
       <Ticker items={s.headlines} />
       <p className="py-1.5 text-center text-[11px] text-muted">Fictional money only. No deposits, no withdrawals, no real wagering. Nothing here is financial advice.</p>
     </div>

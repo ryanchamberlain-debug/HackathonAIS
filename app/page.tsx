@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { JoinBox } from "@/components/JoinBox";
+import { SiteQR } from "@/components/JoinQR";
 import { Logo, Sticker, Ticker } from "@/components/ui";
 import { FILLER_HEADLINES } from "@/lib/headlines";
 
@@ -28,6 +29,9 @@ export default function Home() {
             <p className="text-sm text-muted">On your phone</p>
             <p className="mt-2 font-display text-4xl tracking-wide">JOIN A ROOM</p>
             <JoinBox />
+            <div className="mt-5 border-t border-line pt-5">
+              <SiteQR />
+            </div>
           </div>
         </div>
         <div className="grid gap-4 text-sm text-muted sm:grid-cols-4">
