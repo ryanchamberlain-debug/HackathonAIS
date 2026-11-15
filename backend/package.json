@@ -1,0 +1,14 @@
+{
+  "name": "party-betting-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "In-memory WebSocket backend for a virtual-credit party betting game",
+  "main": "src/server.js",
+  "scripts": { "start": "node src/server.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.1"
+  }
+}
