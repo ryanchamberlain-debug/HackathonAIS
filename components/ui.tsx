@@ -3,8 +3,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, YAxis } from "recharts";
-import { playerById } from "@/lib/engine";
-import { cents, money, shares } from "@/lib/format";
+import { playerById, stakes } from "@/lib/engine";
+import { cents, money } from "@/lib/format";
 import type { GameState, Market, Player } from "@/lib/types";
 
 export function Logo({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
@@ -153,11 +153,10 @@ export function TradeFeed({ state, limit = 8 }: { state: GameState; limit?: numb
             <motion.li key={t.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 text-sm">
               <Avatar p={p} size={20} />
               <span className="truncate font-medium">{p?.name}</span>
-              <span className="text-muted">{t.kind === "buy" ? "bought" : "sold"}</span>
+              <span className="text-muted">bet</span>
               <span className={`num font-semibold ${t.side === "YES" ? "text-yes" : "text-no"}`}>
                 {money(t.amount)} {t.side}
               </span>
-              {t.insider && <span title="Insider trade">🕵️</span>}
               <span className="num ml-auto text-xs text-muted">{cents(t.priceAfter)}</span>
             </motion.li>
           );
@@ -168,13 +167,13 @@ export function TradeFeed({ state, limit = 8 }: { state: GameState; limit?: numb
 }
 
 export function PositionLine({ market, pid }: { market: Market; pid: string }) {
-  const p = market.positions[pid];
-  if (!p || (p.yes < 0.01 && p.no < 0.01)) return <span className="text-muted">No position</span>;
+  const st = stakes(market, pid);
+  if (!st.YES && !st.NO) return <span className="text-muted">No bets</span>;
   return (
     <span className="num">
-      {p.yes >= 0.01 && <span className="text-yes">{shares(p.yes)} YES</span>}
-      {p.yes >= 0.01 && p.no >= 0.01 && " · "}
-      {p.no >= 0.01 && <span className="text-no">{shares(p.no)} NO</span>}
+      {st.YES > 0 && <span className="text-yes">{money(st.YES)} YES</span>}
+      {st.YES > 0 && st.NO > 0 && " · "}
+      {st.NO > 0 && <span className="text-no">{money(st.NO)} NO</span>}
     </span>
   );
 }

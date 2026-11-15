@@ -2,7 +2,8 @@ const WebSocket = require('ws');
 const { createRoom, joinRoom, reconnect, touch, publicRoom, odds } = require('./rooms');
 const { startChallenge, placeBet, lockBetting, resolveChallenge } = require('./challenges');
 
-const MAX_MESSAGE_BYTES = Number(process.env.MAX_MESSAGE_BYTES) || 16 * 1024;
+// The DARE STREET host screen relays full game snapshots, so allow larger messages.
+const MAX_MESSAGE_BYTES = Number(process.env.MAX_MESSAGE_BYTES) || 256 * 1024;
 const RATE_LIMIT_COUNT = 60;
 const RATE_LIMIT_WINDOW_MS = 10_000;
 
@@ -62,9 +63,13 @@ function fail(ws, requestId, error) { send(ws, 'ERROR', { message: error.message
 function handleMessage(ws, data) {
   let requestId;
   try {
-    if (Date.now() - ws.rateWindow >= RATE_LIMIT_WINDOW_MS) { ws.rateWindow = Date.now(); ws.rateCount = 0; }
-    if (++ws.rateCount > RATE_LIMIT_COUNT) throw new Error('Rate limit exceeded. Please slow down.');
     const message = JSON.parse(data.toString());
+    // The host screen streams game state several times a second, so its relays skip the rate limit.
+    const hostRelay = message && message.type === 'RELAY' && ws.player && ws.room && ws.room.hostId === ws.player.id;
+    if (!hostRelay) {
+      if (Date.now() - ws.rateWindow >= RATE_LIMIT_WINDOW_MS) { ws.rateWindow = Date.now(); ws.rateCount = 0; }
+      if (++ws.rateCount > RATE_LIMIT_COUNT) throw new Error('Rate limit exceeded. Please slow down.');
+    }
     if (!message || typeof message !== 'object' || Array.isArray(message) || typeof message.type !== 'string' || !message.payload || typeof message.payload !== 'object' || Array.isArray(message.payload)) throw new Error('Message must contain a type and object payload.');
     requestId = message.requestId;
     if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 100) throw new Error('A requestId string of 1 to 100 characters is required.');
@@ -120,6 +125,18 @@ function dispatch(ws, type, payload, requestId) {
   switch (type) {
     case 'GET_STATE':
       return { type: 'ROOM_STATE', payload: publicRoom(room, player.id) };
+    case 'RELAY': {
+      // DARE STREET game messages: host -> every phone, phone -> host only.
+      if (payload.msg === undefined) throw new Error('RELAY requires a msg.');
+      if (player.id === room.hostId) {
+        for (const other of room.players.values()) if (other.id !== player.id && other.ws) send(other.ws, 'RELAY', { msg: payload.msg });
+      } else {
+        const host = room.players.get(room.hostId);
+        if (host && host.ws) send(host.ws, 'RELAY', { from: player.id, msg: payload.msg });
+      }
+      touch(room);
+      return null;
+    }
     case 'START_CHALLENGE': {
       const challenge = startChallenge(room, player, payload);
       challenge.timer = setTimeout(() => {

@@ -8,7 +8,6 @@ export interface HeadlineInput {
   outcome: Side;
   chickened: boolean;
   closingYes: number;
-  secBusted: boolean;
   topWinner?: string;
   topLoser?: string;
 }
@@ -49,9 +48,8 @@ export function templateHeadline(h: HeadlineInput): { headline: string; subhead:
   }
 
   const bits: string[] = [];
-  if (upset) bits.push(`Historic upset: the market gave this ${odds}% odds.`);
-  else bits.push(`The market called it at ${odds}%.`);
-  if (h.secBusted) bits.push(`The SEC seized ${h.name}'s insider profits.`);
+  if (upset) bits.push(`Historic upset: only ${odds}% of the pot backed it.`);
+  else bits.push(`${odds}% of the pot saw it coming.`);
   if (h.topWinner) bits.push(`${h.topWinner} cashes in.`);
   if (h.topLoser) bits.push(`${h.topLoser} is down bad.`);
   return { headline, subhead: bits.join(" ") };
@@ -61,7 +59,7 @@ export const FILLER_HEADLINES = [
   "DARESTREET INDEX +4.20% ON NOTHING IN PARTICULAR",
   "ANALYSTS DOWNGRADE THE SNACK TABLE TO 'SELL'",
   "FED CHAIR SPOTTED DOING THE WORM, MARKETS RALLY",
-  "INSIDER TRADING NOW CALLED 'VIBES-BASED INVESTING'",
+  "THE POT IS THE PRICE: PARI-MUTUEL MARKETS UP BIG",
   "EMBARRASSMENT REMAINS THE ROOM'S #1 EXPORT",
   "SHORT SELLERS CIRCLE THE BIRTHDAY PERSON",
   "REPORT: 9 OUT OF 10 TRADERS HAVE NO IDEA WHAT THEY'RE DOING",

@@ -1,22 +1,27 @@
 // Bot traders so one person can try the full game, or to pad out a small party.
 
-import { priceYes } from "./lmsr";
+import { MIN_BET, odds } from "./parimutuel";
 import type { GameState, PlayerAction } from "./types";
 
+// The crew: auto-traders who place bets on their own. Add them from the host lobby.
 export const BOT_PROFILES = [
-  { name: "Chad (Finance)", avatar: "🦈" },
-  { name: "Tiffany CPA", avatar: "💅" },
-  { name: "Crypto Kevin", avatar: "🪙" },
-  { name: "Diamond Dave", avatar: "💎" },
-  { name: "Margaret (HR)", avatar: "📋" },
-  { name: "Intern Josh", avatar: "☕" },
-  { name: "Hedge Fund Hal", avatar: "🎩" },
-  { name: "Meme Lord Mo", avatar: "🐸" },
-];
+  { name: "Payton", avatar: "🦈" },
+  { name: "Varun", avatar: "🐂" },
+  { name: "Rose", avatar: "🌹" },
+  { name: "Ryan", avatar: "😎" },
+  { name: "Inesh", avatar: "🦊" },
+  { name: "Hamza", avatar: "🦁" },
+  { name: "Marshall", avatar: "🐻" },
+  { name: "Alex", avatar: "🐸" },
+  { name: "Jin", avatar: "🐼" },
+  { name: "Kassem", avatar: "🐺" },
+  { name: "Thu", avatar: "🦄" },
+  { name: "Eshmom", avatar: "🐙" },
+]
 
 export function nextBotProfile(s: GameState) {
-  const taken = new Set(s.players.map((p) => p.name));
-  return BOT_PROFILES.find((b) => !taken.has(b.name)) ?? null;
+  const taken = new Set(s.players.map((p) => p.name.toLowerCase()));
+  return BOT_PROFILES.find((b) => !taken.has(b.name.toLowerCase())) ?? null;
 }
 
 function hash01(str: string) {
@@ -41,21 +46,12 @@ export function botActions(s: GameState, now: number): { pid: string; a: PlayerA
       if (isSubject && m.card.kind === "truth" && !m.truthLocked && Math.random() < 0.35) {
         out.push({ pid: bot.id, a: { t: "truth", answer: Math.random() < 0.5 ? "YES" : "NO" } });
       }
-      if (Math.random() > 0.2) continue;
-      // Each bot holds a private belief about this market and trades toward it.
-      let belief = 0.15 + hash01(m.id + bot.id) * 0.7;
-      if (isSubject && m.truthLocked && m.truthAnswer) belief = m.truthAnswer === "YES" ? 0.95 : 0.05;
-      const p = priceYes(m.qYes, m.qNo, m.b);
-      const position = m.positions[bot.id];
-      if (position && Math.random() < 0.18) {
-        const side = position.yes >= position.no ? "YES" : "NO";
-        const held = side === "YES" ? position.yes : position.no;
-        if (held > 2) out.push({ pid: bot.id, a: { t: "trade", side, kind: "sell", shares: held * 0.5 } });
-        continue;
-      }
-      const side = belief > p ? "YES" : "NO";
-      const amount = Math.min(bot.cash, Math.round(15 + Math.random() * 110));
-      if (amount >= 5) out.push({ pid: bot.id, a: { t: "trade", side, kind: "buy", amount } });
+      if (isSubject || Math.random() > 0.2) continue; // targets can't bet (backend rule)
+      // Each bot holds a private belief and backs the side the pot is underrating.
+      const belief = 0.15 + hash01(m.id + bot.id) * 0.7;
+      const side = belief > odds(m.pools).YES ? "YES" : "NO";
+      const amount = Math.min(Math.floor(bot.cash), 10 + Math.floor(Math.random() * 11) * 10);
+      if (amount >= MIN_BET) out.push({ pid: bot.id, a: { t: "bet", side, amount } });
     } else if (s.phase === "performing" && isSubject) {
       if (m.card.kind === "truth" && !m.truthLocked) {
         out.push({ pid: bot.id, a: { t: "truth", answer: Math.random() < 0.5 ? "YES" : "NO" } });

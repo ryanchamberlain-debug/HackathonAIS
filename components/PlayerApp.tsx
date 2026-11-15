@@ -7,7 +7,7 @@ import { use, useEffect, useState } from "react";
 import { browser } from "react-dom";
 import { AVATARS, currentYes, playerById, ranks } from "@/lib/engine";
 import { cents, money, uid } from "@/lib/format";
-import { sharesForSpend } from "@/lib/lmsr";
+import { estimatePayout, MIN_BET, multiplier } from "@/lib/parimutuel";
 import { usePlayer, useNow } from "@/lib/net";
 import type { CardKind, GameState, Side } from "@/lib/types";
 import { Avatar, Countdown, KindBadge, Logo, OddsBar, PHASE_LABEL, PnL, PositionLine, PriceChart } from "./ui";
@@ -24,7 +24,7 @@ export default function PlayerApp() {
     sessionStorage.setItem(key, id);
     return id;
   });
-  if (code.length !== 4) {
+  if (!/^[A-Z0-9]{4,6}$/.test(code)) {
     return (
       <div className="p-8 text-center">
         <p>That room code doesn&apos;t look right.</p>
@@ -36,7 +36,7 @@ export default function PlayerApp() {
 }
 
 function Player({ code, pid }: { code: string; pid: string }) {
-  const { state: s, offset, lastSeen, act } = usePlayer(code, pid);
+  const { state: s, offset, lastSeen, act, error } = usePlayer(code, pid);
   const now = useNow();
   const me = s ? playerById(s, pid) : undefined;
   const hostGone = s && now - lastSeen > 9000;
@@ -45,6 +45,16 @@ function Player({ code, pid }: { code: string; pid: string }) {
     if (s?.phase && s.phase !== "lobby") navigator.vibrate?.(40);
   }, [s?.phase]);
 
+  if (!s && error) {
+    return (
+      <Shell code={code}>
+        <div className="py-16 text-center">
+          <p className="text-no">{error}</p>
+          <Link href="/" className="mt-3 inline-block text-gold underline">Back to the lobby</Link>
+        </div>
+      </Shell>
+    );
+  }
   if (!s) {
     return (
       <Shell code={code}>
@@ -167,7 +177,7 @@ function Player({ code, pid }: { code: string; pid: string }) {
               <div className="rounded-2xl border border-line bg-card p-5">
                 <p className="text-sm text-muted">Your round</p>
                 <PnL value={m.result.pnl[pid] ?? 0} className="text-4xl" />
-                {m.result.secBusts.includes(pid) && <p className="mt-2 text-no">🚨 The SEC seized your insider profits.</p>}
+                {m.result.refunded && <p className="mt-2 text-sm text-muted">Nobody backed the winning side, so every stake was refunded.</p>}
               </div>
               <p className="font-display text-xl leading-snug tracking-wide">{m.result.headline}</p>
             </div>
@@ -336,15 +346,25 @@ function TradePanel({ s, pid, act, isSubject }: { s: GameState; pid: string; act
   const [amount, setAmount] = useState(50);
   const [flash, setFlash] = useState<string | null>(null);
   const spend = Math.min(amount, Math.floor(me.cash));
-  const price = side === "YES" ? currentYes(m) : 1 - currentYes(m);
-  const est = sharesForSpend(m.qYes, m.qNo, m.b, side, spend);
-  const position = m.positions[pid];
+  const est = estimatePayout(m.pools, side, spend);
+  const pot = m.pools.YES + m.pools.NO;
 
-  const buy = () => {
-    if (spend < 1) return;
-    act({ t: "trade", side, kind: "buy", amount: spend });
+  if (isSubject) {
+    return (
+      <div className="rounded-2xl border border-gold/50 bg-gold/10 p-4 text-center">
+        <p className="font-semibold">You&apos;re the target. You can&apos;t bet on yourself.</p>
+        <p className="mt-1 text-sm text-muted">
+          Pot so far: <span className="num text-ink">{money(pot)}</span>. Watch the room bet on you.
+        </p>
+      </div>
+    );
+  }
+
+  const bet = () => {
+    if (spend < MIN_BET) return;
+    act({ t: "bet", side, amount: spend });
     navigator.vibrate?.(20);
-    setFlash(`Bought ${money(spend)} of ${side}`);
+    setFlash(`Bet ${money(spend)} on ${side}`);
     setTimeout(() => setFlash(null), 1200);
   };
 
@@ -353,12 +373,14 @@ function TradePanel({ s, pid, act, isSubject }: { s: GameState; pid: string; act
       <div className="grid grid-cols-2 gap-2">
         {(["YES", "NO"] as Side[]).map((x) => {
           const p = x === "YES" ? currentYes(m) : 1 - currentYes(m);
+          const mult = multiplier(m.pools, x);
           const on = side === x;
           const tone = x === "YES" ? (on ? "bg-yes text-bg" : "bg-yes/10 text-yes") : on ? "bg-no text-bg" : "bg-no/10 text-no";
           return (
             <button key={x} onClick={() => setSide(x)} className={`rounded-xl py-3 text-center transition ${tone}`}>
               <div className="text-sm font-semibold">{x}</div>
-              <div className="num text-2xl font-bold">{cents(p)}</div>
+              <div className="num text-2xl font-bold">{Math.round(p * 100)}%</div>
+              <div className="num text-xs opacity-80">{mult ? `pays ${mult.toFixed(2)}x` : "empty pool"}</div>
             </button>
           );
         })}
@@ -373,36 +395,26 @@ function TradePanel({ s, pid, act, isSubject }: { s: GameState; pid: string; act
           ALL IN
         </button>
       </div>
-      <button disabled={spend < 1} onClick={buy} className={`w-full rounded-xl py-4 text-lg font-bold text-bg disabled:opacity-40 ${side === "YES" ? "bg-yes" : "bg-no"}`}>
-        Buy {money(spend)} {side} · to win {money(est)}
+      <button disabled={spend < MIN_BET} onClick={bet} className={`w-full rounded-xl py-4 text-lg font-bold text-bg disabled:opacity-40 ${side === "YES" ? "bg-yes" : "bg-no"}`}>
+        Bet {money(spend)} {side} · est. {money(est)} back
       </button>
       <p className="text-center text-xs text-muted">
-        Avg {cents(spend > 0 && est > 0 ? spend / est : price)} per share · each share pays $1 if {side} wins
+        Pot <span className="num text-ink">{money(pot)}</span>. Winners split the whole pot by stake, so the estimate moves as others bet. Min bet ${MIN_BET}.
       </p>
-      {isSubject && <p className="rounded-lg bg-gold/10 p-2 text-center text-xs text-gold">🕵️ You can trade your own market. If you profit, the SEC has a 50% chance of seizing it plus a $100 fine.</p>}
-      <AnimatePresence>{flash && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center text-sm text-gold">{flash}</motion.p>}</AnimatePresence>
+      <AnimatePresence>
+        {flash && (
+          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center text-sm text-gold">
+            {flash}
+          </motion.p>
+        )}
+      </AnimatePresence>
       <div className="rounded-xl border border-line bg-card p-3">
         <PriceChart market={m} height={110} />
       </div>
-      {position && (position.yes >= 0.01 || position.no >= 0.01) && (
-        <div className="rounded-xl border border-line bg-card p-3 text-sm">
-          <div className="mb-2 flex justify-between">
-            <span className="text-muted">Your position</span>
-            <PositionLine market={m} pid={pid} />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {(["YES", "NO"] as Side[]).map((x) => {
-              const held = x === "YES" ? position.yes : position.no;
-              if (held < 0.01) return <span key={x} />;
-              return (
-                <button key={x} onClick={() => act({ t: "trade", side: x, kind: "sell", shares: held })} className="rounded-lg border border-line py-2 text-xs font-semibold hover:bg-card2">
-                  Sell all {x}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <div className="flex justify-between rounded-xl border border-line bg-card p-3 text-sm">
+        <span className="text-muted">Your bets</span>
+        <PositionLine market={m} pid={pid} />
+      </div>
     </div>
   );
 }

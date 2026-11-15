@@ -14,12 +14,9 @@ export type Phase =
 
 export interface PlayerStats {
   trades: number;
-  sells: number;
   wins: number;
   biggestWin: number;
   biggestLoss: number;
-  insiderTrades: number;
-  insiderBusts: number;
   chickens: number;
   daresDone: number;
 }
@@ -35,23 +32,14 @@ export interface Player {
   stats: PlayerStats;
 }
 
-export interface Position {
-  yes: number;
-  no: number;
-  yesCost: number;
-  noCost: number;
-}
-
 export interface Trade {
   id: string;
   playerId: string;
   side: Side;
-  kind: "buy" | "sell";
-  shares: number;
   amount: number;
+  /** YES odds (pool share) right after this bet. */
   priceAfter: number;
   at: number;
-  insider: boolean;
 }
 
 export interface PricePoint {
@@ -73,8 +61,8 @@ export interface MarketResult {
   headline: string;
   subhead: string;
   pnl: Record<string, number>;
-  secBusts: string[];
-  insiderWalked: string[];
+  refunded: boolean;
+  totalPool: number;
   closingYes: number;
 }
 
@@ -84,12 +72,10 @@ export interface Market {
   card: Card;
   subjectId: string;
   question: string;
-  b: number;
-  qYes: number;
-  qNo: number;
+  pools: { YES: number; NO: number };
   history: PricePoint[];
+  /** Every bet, in order (pari-mutuel, same rules as backend/src/challenges.js). */
   trades: Trade[];
-  positions: Record<string, Position>;
   startCash: Record<string, number>;
   openedAt: number | null;
   closedAt: number | null;
@@ -159,8 +145,7 @@ export interface GameState {
 
 export type PlayerAction =
   | { t: "join"; name: string; avatar: string }
-  | { t: "trade"; side: Side; kind: "buy"; amount: number }
-  | { t: "trade"; side: Side; kind: "sell"; shares: number }
+  | { t: "bet"; side: Side; amount: number }
   | { t: "truth"; answer: Side }
   | { t: "dareDone" }
   | { t: "chicken" }
@@ -174,4 +159,3 @@ export type WireMsg =
 
 export const STARTING_CASH = 1000;
 export const CHICKEN_TAX = 100;
-export const SEC_FINE = 100;

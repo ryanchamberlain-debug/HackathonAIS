@@ -1,39 +1,55 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Bot, ExternalLink, FastForward, Play, RotateCcw, Square, X } from "lucide-react";
+import { Bot, ExternalLink, Users, FastForward, Play, RotateCcw, Square, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { use, useEffect, useState } from "react";
 import { browser } from "react-dom";
 import { nextBotProfile } from "@/lib/bots";
-import { addPlayer, advance, createGame, currentYes, endGameNow, playAgain, playerById, removePlayer, startGame, updateSettings } from "@/lib/engine";
+import { MAX_PLAYERS, addPlayer, advance, createGame, currentYes, endGameNow, playAgain, playerById, removePlayer, startGame, updateSettings } from "@/lib/engine";
 import { cents, money, roomCode, uid } from "@/lib/format";
-import { liveAvailable, loadRoom, netMode, useHost, useNow } from "@/lib/net";
+import { connectBackend, liveAvailable, loadRoom, netMode, openTransport, useHost, useNow, type Transport } from "@/lib/net";
 import type { GameState } from "@/lib/types";
 import { Avatar, Countdown, KindBadge, Leaderboard, Logo, OddsBar, PHASE_LABEL, PnL, PriceChart, Sticker, Ticker, TradeFeed } from "./ui";
 
 export default function HostApp() {
   use(browser("The host screen keeps game state in this browser."));
-  const [initial, setInitial] = useState<GameState | null>(null);
+  const [boot, setBoot] = useState<{ initial: GameState; transport: Transport } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const code = params.get("code")?.toUpperCase();
+    const asked = params.get("code")?.toUpperCase();
+    let transport: Transport | null = null;
+    let cancelled = false;
     (async () => {
-      const saved = code ? await loadRoom(code) : null;
-      const s = saved ?? createGame(code && code.length === 4 ? code : roomCode(), Date.now());
-      params.set("code", s.code);
+      let code = asked && /^[A-Z0-9]{4,6}$/.test(asked) ? asked : roomCode();
+      if (netMode() === "backend") {
+        // The backend owns room codes: reconnect to ours, or create a fresh room.
+        transport = await connectBackend({ code: asked, host: true });
+        code = transport.code;
+      }
+      const saved = await loadRoom(code);
+      const initial = saved ?? createGame(code, Date.now());
+      transport ??= await openTransport(code, true);
+      if (cancelled) return transport.close();
+      params.set("code", code);
       window.history.replaceState(null, "", `/host?${params.toString()}`);
-      setInitial(s);
-    })();
+      setBoot({ initial, transport });
+    })().catch((e: Error) => !cancelled && setError(`${e.message} Start it with: cd backend && npm start`));
+    return () => {
+      cancelled = true;
+      transport?.close();
+    };
   }, []);
 
-  if (!initial) return <div className="p-10 text-muted">Opening the exchange…</div>;
-  return <HostScreen initial={initial} />;
+  if (error) return <div className="p-10 text-no">{error}</div>;
+  if (!boot) return <div className="p-10 text-muted">Opening the exchange…</div>;
+  return <HostScreen initial={boot.initial} transport={boot.transport} />;
 }
 
-function HostScreen({ initial }: { initial: GameState }) {
-  const { state: s, commit } = useHost(initial);
+function HostScreen({ initial, transport }: { initial: GameState; transport: Transport }) {
+  const { state: s, commit } = useHost(initial, transport);
   const now = useNow();
   const mode = netMode();
   const joinUrl = `${window.location.origin}/play?code=${s.code}${mode === "local" && liveAvailable ? "&local=1" : ""}`;
@@ -47,6 +63,13 @@ function HostScreen({ initial }: { initial: GameState }) {
       addPlayer(d, { id: uid("bot"), name: prof.name, avatar: prof.avatar, isBot: true }, t);
     });
 
+  const addCrew = () =>
+    commit((d, t) => {
+      for (let prof = nextBotProfile(d); prof && d.players.length < MAX_PLAYERS; prof = nextBotProfile(d)) {
+        addPlayer(d, { id: uid("bot"), name: prof.name, avatar: prof.avatar, isBot: true }, t);
+      }
+    });
+
   return (
     <div className="grid-bg flex min-h-dvh flex-col">
       <header className="flex flex-wrap items-center gap-4 border-b border-line bg-bg/90 px-5 py-3">
@@ -54,8 +77,8 @@ function HostScreen({ initial }: { initial: GameState }) {
         <span className="rounded bg-card px-2 py-1 font-mono text-xs text-muted">
           ROOM <span className="text-ink">{s.code}</span>
         </span>
-        <span className={`rounded px-2 py-1 font-mono text-xs ${mode === "live" ? "bg-yes/15 text-yes" : "bg-gold/15 text-gold"}`}>
-          {mode === "live" ? "● LIVE MULTIPLAYER" : "● DEMO MODE (THIS BROWSER)"}
+        <span className={`rounded px-2 py-1 font-mono text-xs ${mode !== "local" ? "bg-yes/15 text-yes" : "bg-gold/15 text-gold"}`}>
+          {mode === "backend" ? "● LIVE · GAME SERVER" : mode === "live" ? "● LIVE · SUPABASE" : "● DEMO MODE (THIS BROWSER)"}
         </span>
         {s.phase !== "lobby" && (
           <>
@@ -87,7 +110,7 @@ function HostScreen({ initial }: { initial: GameState }) {
       <main className="flex-1 p-5">
         <AnimatePresence mode="wait">
           <motion.div key={s.phase + s.round} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.25 }}>
-            {s.phase === "lobby" && <Lobby s={s} joinUrl={joinUrl} mode={mode} addBot={addBot} commit={commit} />}
+            {s.phase === "lobby" && <Lobby s={s} joinUrl={joinUrl} mode={mode} addBot={addBot} addCrew={addCrew} commit={commit} />}
             {m && subject && ["intro", "trading", "performing", "voting"].includes(s.phase) && (
               <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
                 <section className="rounded-2xl border border-line bg-card p-6">
@@ -112,16 +135,18 @@ function HostScreen({ initial }: { initial: GameState }) {
                       <div className="mb-3 flex items-end gap-6">
                         <div>
                           <div className="text-xs text-muted">YES</div>
-                          <div className="num text-5xl font-bold text-yes">{cents(currentYes(m))}</div>
+                          <div className="num text-5xl font-bold text-yes">{Math.round(currentYes(m) * 100)}%</div>
+                          <div className="num text-xs text-muted">pool {money(m.pools.YES)}</div>
                         </div>
                         <div>
                           <div className="text-xs text-muted">NO</div>
-                          <div className="num text-5xl font-bold text-no">{cents(1 - currentYes(m))}</div>
+                          <div className="num text-5xl font-bold text-no">{Math.round((1 - currentYes(m)) * 100)}%</div>
+                          <div className="num text-xs text-muted">pool {money(m.pools.NO)}</div>
                         </div>
                         <div className="ml-auto text-right text-sm text-muted">
-                          Volume <span className="num text-ink">{money(m.trades.reduce((a, t) => a + t.amount, 0))}</span>
+                          Pot <span className="num text-ink">{money(m.trades.reduce((a, t) => a + t.amount, 0))}</span>
                           <br />
-                          Trades <span className="num text-ink">{m.trades.length}</span>
+                          Bets <span className="num text-ink">{m.trades.length}</span>
                         </div>
                       </div>
                       <OddsBar yes={currentYes(m)} />
@@ -179,12 +204,10 @@ function HostScreen({ initial }: { initial: GameState }) {
                   <span className={`font-display text-5xl ${m.result.outcome === "YES" ? "text-yes" : "text-no"}`}>{m.result.outcome}</span>
                   <span className="text-sm text-muted">{m.result.reason}</span>
                 </div>
-                {m.result.secBusts.length > 0 && (
-                  <p className="mt-5 text-xl">
-                    🚨 <b>SEC BUST:</b> {subject.name} traded on inside information. Profits seized plus a $100 fine.
-                  </p>
-                )}
-                {m.result.insiderWalked.length > 0 && <p className="mt-5 text-xl">🕵️ {subject.name} insider-traded and walked free. For now.</p>}
+                <p className="mt-5 text-lg text-muted">
+                  Pot <span className="num text-ink">{money(m.result.totalPool)}</span>
+                  {m.result.refunded ? " · nobody backed the winner, all stakes refunded" : " split among the winners by stake"}
+                </p>
                 <div className="mx-auto mt-8 grid max-w-3xl gap-2 sm:grid-cols-2">
                   {Object.entries(m.result.pnl)
                     .filter(([, v]) => Math.abs(v) >= 1)
@@ -231,7 +254,7 @@ function HostScreen({ initial }: { initial: GameState }) {
   );
 }
 
-function Lobby({ s, joinUrl, mode, addBot, commit }: { s: GameState; joinUrl: string; mode: string; addBot: () => void; commit: ReturnType<typeof useHost>["commit"] }) {
+function Lobby({ s, joinUrl, mode, addBot, addCrew, commit }: { s: GameState; joinUrl: string; mode: string; addBot: () => void; addCrew: () => void; commit: ReturnType<typeof useHost>["commit"] }) {
   const seg = (vals: number[], cur: number, set: (v: number) => void, fmt: (v: number) => string) => (
     <div className="flex gap-1">
       {vals.map((v) => (
@@ -270,8 +293,11 @@ function Lobby({ s, joinUrl, mode, addBot, commit }: { s: GameState; joinUrl: st
             </p>
           </div>
           <div className="flex gap-2">
+            <button onClick={addCrew} className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-4 py-2.5 text-sm hover:bg-card2">
+              <Users className="size-4" /> Add the crew
+            </button>
             <button onClick={addBot} className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-4 py-2.5 text-sm hover:bg-card2">
-              <Bot className="size-4" /> Add bot
+              <Bot className="size-4" /> Add one
             </button>
             <button
               disabled={s.players.length < 2}
@@ -320,7 +346,7 @@ function Lobby({ s, joinUrl, mode, addBot, commit }: { s: GameState; joinUrl: st
             <b className="text-ink">1. IPO.</b> Each round, one player gets a truth or a dare. It becomes a YES/NO market.
           </p>
           <p>
-            <b className="text-ink">2. Trade.</b> Buy YES or NO on your phone. Prices move as people bet. Shares pay $1 if right.
+            <b className="text-ink">2. Bet.</b> Put credits on YES or NO. Odds are each side&apos;s share of the pot. Winners split the pot.
           </p>
           <p>
             <b className="text-ink">3. Settle.</b> They answer or perform, the jury votes, and the market pays out. Richest at the bell wins.

@@ -5,7 +5,7 @@ import { BASE_DECK, marketQuestion } from "./cards";
 import { rollEvent } from "./events";
 import { pick, round2, shuffle, uid } from "./format";
 import { FILLER_HEADLINES, templateHeadline } from "./headlines";
-import { liquidityFor, priceYes, proceedsForSell, sharesForSpend } from "./lmsr";
+import { MIN_BET, odds, settle } from "./parimutuel";
 import type {
   Award,
   Card,
@@ -15,10 +15,9 @@ import type {
   Player,
   PlayerAction,
   PlayerStats,
-  Position,
   Side,
 } from "./types";
-import { CHICKEN_TAX, SEC_FINE, STARTING_CASH } from "./types";
+import { CHICKEN_TAX, STARTING_CASH } from "./types";
 
 export const MAX_PLAYERS = 16;
 
@@ -42,7 +41,7 @@ const COLORS = [
 export const AVATARS = ["🦈", "🐂", "🐻", "🦊", "🐸", "🦄", "🐙", "🦁", "🐼", "🐵", "🦩", "🐺", "🤑", "😎", "🤡", "👽"];
 
 export function emptyStats(): PlayerStats {
-  return { trades: 0, sells: 0, wins: 0, biggestWin: 0, biggestLoss: 0, insiderTrades: 0, insiderBusts: 0, chickens: 0, daresDone: 0 };
+  return { trades: 0, wins: 0, biggestWin: 0, biggestLoss: 0, chickens: 0, daresDone: 0 };
 }
 
 export function createGame(code: string, now: number): GameState {
@@ -76,13 +75,16 @@ export function ranks(s: GameState): Record<string, number> {
   return Object.fromEntries(sorted.map((p, i) => [p.id, i + 1]));
 }
 
+/** YES odds = YES pool share of the total (backend rooms.js odds()). */
 export function currentYes(m: Market) {
-  return priceYes(m.qYes, m.qNo, m.b);
+  return odds(m.pools).YES;
 }
 
-function pos(m: Market, pid: string): Position {
-  m.positions[pid] ??= { yes: 0, no: 0, yesCost: 0, noCost: 0 };
-  return m.positions[pid];
+/** Total staked by a player on each side this market. */
+export function stakes(m: Market, pid: string) {
+  const out = { YES: 0, NO: 0 };
+  for (const t of m.trades) if (t.playerId === pid) out[t.side] += t.amount;
+  return out;
 }
 
 function cleanName(name: string) {
@@ -189,12 +191,9 @@ function beginRound(s: GameState, now: number) {
     card,
     subjectId,
     question: marketQuestion(card, subject.name),
-    b: liquidityFor(s.players.length),
-    qYes: 0,
-    qNo: 0,
+    pools: { YES: 0, NO: 0 },
     history: [{ t: 0, yes: 0.5 }],
     trades: [],
-    positions: {},
     startCash: Object.fromEntries(s.players.map((p) => [p.id, p.cash])),
     openedAt: null,
     closedAt: null,
@@ -258,11 +257,13 @@ function resolve(s: GameState, now: number) {
     }
   }
 
-  for (const p of s.players) {
-    const position = m.positions[p.id];
-    if (!position) continue;
-    p.cash = round2(p.cash + (outcome === "YES" ? position.yes : position.no));
+  // Pari-mutuel settlement, same algorithm as backend resolveChallenge().
+  const settlement = settle(m.trades, m.pools, outcome);
+  for (const { bet, payout } of settlement.payoutBets) {
+    const p = playerById(s, bet.playerId);
+    if (p) p.cash = round2(p.cash + payout);
   }
+  if (settlement.refunded && m.trades.length) reason += ". Nobody backed it, so all stakes are refunded";
 
   if (subject && m.chickened) {
     subject.cash = Math.max(0, round2(subject.cash - CHICKEN_TAX));
@@ -272,17 +273,6 @@ function resolve(s: GameState, now: number) {
 
   const pnl: Record<string, number> = {};
   for (const p of s.players) pnl[p.id] = round2(p.cash - (m.startCash[p.id] ?? p.cash));
-
-  const secBusts: string[] = [];
-  const insiderWalked: string[] = [];
-  if (subject && m.trades.some((t) => t.insider) && pnl[subject.id] > 0) {
-    if (Math.random() < 0.5) {
-      subject.cash = Math.max(0, round2(subject.cash - pnl[subject.id] - SEC_FINE));
-      pnl[subject.id] = round2(subject.cash - (m.startCash[subject.id] ?? subject.cash));
-      subject.stats.insiderBusts += 1;
-      secBusts.push(subject.id);
-    } else insiderWalked.push(subject.id);
-  }
 
   for (const p of s.players) {
     const v = pnl[p.id];
@@ -303,12 +293,11 @@ function resolve(s: GameState, now: number) {
     outcome,
     chickened: m.chickened,
     closingYes,
-    secBusted: secBusts.length > 0,
     topWinner: topWinner ? playerById(s, topWinner.id)?.name : undefined,
     topLoser: topLoser ? playerById(s, topLoser.id)?.name : undefined,
   });
 
-  m.result = { outcome, chickened: m.chickened, reason, headline, subhead, pnl, secBusts, insiderWalked, closingYes };
+  m.result = { outcome, chickened: m.chickened, reason, headline, subhead, pnl, refunded: settlement.refunded, totalPool: settlement.totalPool, closingYes };
   s.pastMarkets.push({
     round: m.round,
     kind: m.card.kind,
@@ -434,58 +423,17 @@ export function applyAction(s: GameState, pid: string, a: PlayerAction, now: num
   const isSubject = m.subjectId === pid;
 
   switch (a.t) {
-    case "trade": {
+    case "bet": {
+      // Same validation as backend placeBet().
       if (s.phase !== "trading") return;
-      const position = pos(m, pid);
-      let shares = 0;
-      let amount = 0;
-      if (a.kind === "buy") {
-        amount = round2(Math.min(Math.max(0, a.amount), player.cash));
-        if (amount < 1) return;
-        shares = sharesForSpend(m.qYes, m.qNo, m.b, a.side, amount);
-        if (a.side === "YES") {
-          m.qYes += shares;
-          position.yes += shares;
-          position.yesCost += amount;
-        } else {
-          m.qNo += shares;
-          position.no += shares;
-          position.noCost += amount;
-        }
-        player.cash = round2(player.cash - amount);
-      } else {
-        const held = a.side === "YES" ? position.yes : position.no;
-        shares = Math.min(Math.max(0, a.shares), held);
-        if (shares < 0.01) return;
-        amount = round2(proceedsForSell(m.qYes, m.qNo, m.b, a.side, shares));
-        const frac = held > 0 ? shares / held : 1;
-        if (a.side === "YES") {
-          m.qYes -= shares;
-          position.yes -= shares;
-          position.yesCost *= 1 - frac;
-        } else {
-          m.qNo -= shares;
-          position.no -= shares;
-          position.noCost *= 1 - frac;
-        }
-        player.cash = round2(player.cash + amount);
-        player.stats.sells += 1;
-      }
+      if (isSubject) return; // the target cannot bet on their own challenge
+      const amount = Math.floor(a.amount);
+      if (!Number.isSafeInteger(amount) || amount < MIN_BET || amount > player.cash) return;
+      player.cash = round2(player.cash - amount);
+      m.pools[a.side] += amount;
       const priceAfter = currentYes(m);
       player.stats.trades += 1;
-      if (isSubject && a.kind === "buy") player.stats.insiderTrades += 1;
-      m.trades.push({
-        id: uid("tr"),
-        playerId: pid,
-        side: a.side,
-        kind: a.kind,
-        shares,
-        amount,
-        priceAfter,
-        at: now,
-        insider: isSubject,
-      });
-      if (m.trades.length > 250) m.trades.splice(0, m.trades.length - 250);
+      m.trades.push({ id: uid("tr"), playerId: pid, side: a.side, amount, priceAfter, at: now });
       m.history.push({ t: now - (m.openedAt ?? now), yes: priceAfter });
       if (m.history.length > 400) m.history.splice(1, m.history.length - 400);
       return;
@@ -543,15 +491,11 @@ export function computeAwards(s: GameState): Award[] {
   if (diamond) awards.push({ id: "diamond", emoji: "💎", title: "Diamond Hands", playerId: diamond.id, detail: `Biggest single round: +$${Math.round(diamond.stats.biggestWin).toLocaleString()}` });
   const bag = best((p) => -p.stats.biggestLoss, 1);
   if (bag) awards.push({ id: "bag", emoji: "🛍️", title: "Bagholder of the Year", playerId: bag.id, detail: `Lost $${Math.round(-bag.stats.biggestLoss).toLocaleString()} in one round` });
-  const sec = best((p) => p.stats.insiderBusts * 10 + p.stats.insiderTrades);
-  if (sec) awards.push({ id: "sec", emoji: "🕵️", title: "Most Wanted by the SEC", playerId: sec.id, detail: `${sec.stats.insiderTrades} insider trades, ${sec.stats.insiderBusts} busts` });
   const chicken = best((p) => p.stats.chickens);
   if (chicken) awards.push({ id: "chicken", emoji: "🐔", title: "Chicken Little", playerId: chicken.id, detail: `Chickened out ${chicken.stats.chickens}x` });
   const daredevil = best((p) => p.stats.daresDone);
   if (daredevil) awards.push({ id: "daredevil", emoji: "🔥", title: "No Shame Award", playerId: daredevil.id, detail: `Completed ${daredevil.stats.daresDone} dare${daredevil.stats.daresDone === 1 ? "" : "s"}` });
   const day = best((p) => p.stats.trades);
   if (day) awards.push({ id: "day", emoji: "📈", title: "Day Trader", playerId: day.id, detail: `${day.stats.trades} trades` });
-  const paper = best((p) => p.stats.sells);
-  if (paper) awards.push({ id: "paper", emoji: "🧻", title: "Paper Hands", playerId: paper.id, detail: `Panic-sold ${paper.stats.sells}x` });
   return awards;
 }
