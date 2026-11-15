@@ -1,0 +1,373 @@
+"use client";
+
+import { AnimatePresence, motion } from "framer-motion";
+import { Bot, ExternalLink, FastForward, Play, RotateCcw, Square, X } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { use, useEffect, useState } from "react";
+import { browser } from "react-dom";
+import { nextBotProfile } from "@/lib/bots";
+import { addPlayer, advance, createGame, currentYes, endGameNow, playAgain, playerById, removePlayer, startGame, updateSettings } from "@/lib/engine";
+import { cents, money, roomCode, uid } from "@/lib/format";
+import { liveAvailable, loadRoom, netMode, useHost, useNow } from "@/lib/net";
+import type { GameState } from "@/lib/types";
+import { Avatar, Countdown, KindBadge, Leaderboard, Logo, OddsBar, PHASE_LABEL, PnL, PriceChart, Sticker, Ticker, TradeFeed } from "./ui";
+
+export default function HostApp() {
+  use(browser("The host screen keeps game state in this browser."));
+  const [initial, setInitial] = useState<GameState | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code")?.toUpperCase();
+    (async () => {
+      const saved = code ? await loadRoom(code) : null;
+      const s = saved ?? createGame(code && code.length === 4 ? code : roomCode(), Date.now());
+      params.set("code", s.code);
+      window.history.replaceState(null, "", `/host?${params.toString()}`);
+      setInitial(s);
+    })();
+  }, []);
+
+  if (!initial) return <div className="p-10 text-muted">Opening the exchange…</div>;
+  return <HostScreen initial={initial} />;
+}
+
+function HostScreen({ initial }: { initial: GameState }) {
+  const { state: s, commit } = useHost(initial);
+  const now = useNow();
+  const mode = netMode();
+  const joinUrl = `${window.location.origin}/play?code=${s.code}${mode === "local" && liveAvailable ? "&local=1" : ""}`;
+  const m = s.market;
+  const subject = playerById(s, m?.subjectId);
+
+  const addBot = () =>
+    commit((d, t) => {
+      const prof = nextBotProfile(d);
+      if (!prof) return false;
+      addPlayer(d, { id: uid("bot"), name: prof.name, avatar: prof.avatar, isBot: true }, t);
+    });
+
+  return (
+    <div className="grid-bg flex min-h-dvh flex-col">
+      <header className="flex flex-wrap items-center gap-4 border-b border-line bg-bg/90 px-5 py-3">
+        <Logo size="sm" />
+        <span className="rounded bg-card px-2 py-1 font-mono text-xs text-muted">
+          ROOM <span className="text-ink">{s.code}</span>
+        </span>
+        <span className={`rounded px-2 py-1 font-mono text-xs ${mode === "live" ? "bg-yes/15 text-yes" : "bg-gold/15 text-gold"}`}>
+          {mode === "live" ? "● LIVE MULTIPLAYER" : "● DEMO MODE (THIS BROWSER)"}
+        </span>
+        {s.phase !== "lobby" && (
+          <>
+            <span className="font-mono text-xs text-muted">
+              ROUND <span className="text-ink">{s.round}/{s.settings.rounds}</span>
+            </span>
+            <span className="rounded bg-no/15 px-2 py-1 font-mono text-xs font-bold text-no">
+              {s.phase === "performing" ? <span className="blink">● </span> : null}
+              {PHASE_LABEL[s.phase]}
+            </span>
+            <Countdown endsAt={s.phaseEndsAt} now={now} total={s.phase === "trading" ? s.settings.tradingSeconds * 1000 : undefined} />
+          </>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {s.phase !== "lobby" && s.phase !== "final" && (
+            <>
+              <button onClick={() => commit((d, t) => advance(d, t))} className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-card">
+                <FastForward className="size-4" /> Skip
+              </button>
+              <button onClick={() => confirm("End the game now?") && commit((d) => endGameNow(d))} className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm text-no hover:bg-card">
+                <Square className="size-4" /> End
+              </button>
+            </>
+          )}
+          {s.phase !== "lobby" && <QRCodeSVG value={joinUrl} size={44} bgColor="#0B1015" fgColor="#E8EEF2" />}
+        </div>
+      </header>
+
+      <main className="flex-1 p-5">
+        <AnimatePresence mode="wait">
+          <motion.div key={s.phase + s.round} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.25 }}>
+            {s.phase === "lobby" && <Lobby s={s} joinUrl={joinUrl} mode={mode} addBot={addBot} commit={commit} />}
+            {m && subject && ["intro", "trading", "performing", "voting"].includes(s.phase) && (
+              <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
+                <section className="rounded-2xl border border-line bg-card p-6">
+                  <div className="mb-4 flex items-center gap-3">
+                    <Avatar p={subject} size={52} />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <KindBadge kind={m.card.kind} />
+                        {m.card.custom && <Sticker color="bg-hot" rotate="rotate-2">player submitted</Sticker>}
+                      </div>
+                      <h1 className="mt-1 text-3xl font-bold sm:text-4xl">{m.question}</h1>
+                    </div>
+                  </div>
+                  <blockquote className="mb-5 rounded-xl border-l-4 border-gold bg-bg/60 p-4 text-xl leading-snug">{m.card.text}</blockquote>
+                  {s.phase === "intro" ? (
+                    <div className="py-10 text-center">
+                      <p className="font-display text-5xl tracking-wide text-gold">NEW IPO INCOMING</p>
+                      <p className="mt-3 text-muted">Trading opens in a few seconds. Get your phones out.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mb-3 flex items-end gap-6">
+                        <div>
+                          <div className="text-xs text-muted">YES</div>
+                          <div className="num text-5xl font-bold text-yes">{cents(currentYes(m))}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-muted">NO</div>
+                          <div className="num text-5xl font-bold text-no">{cents(1 - currentYes(m))}</div>
+                        </div>
+                        <div className="ml-auto text-right text-sm text-muted">
+                          Volume <span className="num text-ink">{money(m.trades.reduce((a, t) => a + t.amount, 0))}</span>
+                          <br />
+                          Trades <span className="num text-ink">{m.trades.length}</span>
+                        </div>
+                      </div>
+                      <OddsBar yes={currentYes(m)} />
+                      <div className="mt-4">
+                        <PriceChart market={m} height={260} />
+                      </div>
+                    </>
+                  )}
+                  {s.phase === "performing" && (
+                    <div className="mt-5 rounded-xl bg-no/10 p-4 text-center text-lg">
+                      <span className="blink text-no">● LIVE</span> Market closed.{" "}
+                      {m.card.kind === "dare" ? (
+                        <>
+                          <b>{subject.name}</b>, perform the dare now. Tap <b>I did it</b> on your phone when finished.
+                        </>
+                      ) : m.truthLocked ? (
+                        <>
+                          <b>{subject.name}</b> has locked an answer. Drumroll… then say it out loud and explain yourself.
+                        </>
+                      ) : (
+                        <>
+                          Waiting for <b>{subject.name}</b> to lock their secret answer…
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {s.phase === "voting" && (
+                    <div className="mt-5 rounded-xl bg-gold/10 p-4 text-center text-lg">
+                      ⚖️ Jury is out. Was that dare <b className="text-yes">legit</b> or <b className="text-no">fraud</b>? Vote on your phones.
+                      <div className="num mt-2 text-sm text-muted">
+                        {Object.keys(m.votes).length}/{s.players.length - 1} votes in
+                      </div>
+                    </div>
+                  )}
+                </section>
+                <aside className="space-y-5">
+                  <div className="rounded-2xl border border-line bg-card p-4">
+                    <h2 className="mb-3 font-mono text-xs tracking-widest text-muted">ORDER FLOW</h2>
+                    <TradeFeed state={s} limit={9} />
+                  </div>
+                  <div className="rounded-2xl border border-line bg-card p-4">
+                    <h2 className="mb-3 font-mono text-xs tracking-widest text-muted">PORTFOLIOS</h2>
+                    <Leaderboard state={s} compact />
+                  </div>
+                </aside>
+              </div>
+            )}
+            {s.phase === "resolution" && m?.result && subject && (
+              <div className="mx-auto max-w-4xl text-center">
+                <div className="mb-3 inline-block bg-no px-3 py-1 font-display text-xl tracking-widest">BREAKING NEWS</div>
+                <h1 className="font-display text-4xl leading-tight tracking-wide sm:text-6xl">{m.result.headline}</h1>
+                <p className="mt-4 text-lg text-muted">{m.result.subhead}</p>
+                <div className="mt-8 inline-flex items-center gap-4 rounded-2xl border border-line bg-card px-6 py-4">
+                  <span className="text-muted">Market resolved</span>
+                  <span className={`font-display text-5xl ${m.result.outcome === "YES" ? "text-yes" : "text-no"}`}>{m.result.outcome}</span>
+                  <span className="text-sm text-muted">{m.result.reason}</span>
+                </div>
+                {m.result.secBusts.length > 0 && (
+                  <p className="mt-5 text-xl">
+                    🚨 <b>SEC BUST:</b> {subject.name} traded on inside information. Profits seized plus a $100 fine.
+                  </p>
+                )}
+                {m.result.insiderWalked.length > 0 && <p className="mt-5 text-xl">🕵️ {subject.name} insider-traded and walked free. For now.</p>}
+                <div className="mx-auto mt-8 grid max-w-3xl gap-2 sm:grid-cols-2">
+                  {Object.entries(m.result.pnl)
+                    .filter(([, v]) => Math.abs(v) >= 1)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([id, v]) => {
+                      const p = playerById(s, id);
+                      return (
+                        <div key={id} className="flex items-center gap-3 rounded-lg border border-line bg-card px-3 py-2">
+                          <Avatar p={p} size={28} />
+                          <span className="flex-1 truncate text-left">{p?.name}</span>
+                          <PnL value={v} />
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+            {s.phase === "event" && s.event && (
+              <div className="mx-auto max-w-3xl py-10 text-center">
+                <motion.div initial={{ scale: 0.6, rotate: -8 }} animate={{ scale: 1, rotate: 0 }} className="text-8xl">
+                  {s.event.emoji}
+                </motion.div>
+                <div className="mt-4 inline-block bg-gold px-3 py-1 font-display text-xl tracking-widest text-bg">MARKET EVENT</div>
+                <h1 className="mt-4 font-display text-6xl tracking-wide">{s.event.title}</h1>
+                <p className="mt-4 text-xl text-ink/85">{s.event.body}</p>
+              </div>
+            )}
+            {s.phase === "leaderboard" && (
+              <div className="mx-auto max-w-2xl">
+                <h1 className="mb-1 font-display text-5xl tracking-wide">STANDINGS</h1>
+                <p className="mb-5 text-muted">
+                  After round {s.round} of {s.settings.rounds}. {s.round >= s.settings.rounds ? "Closing bell next." : "Next IPO loading…"}
+                </p>
+                <Leaderboard state={s} />
+              </div>
+            )}
+            {s.phase === "final" && <Final s={s} again={() => commit((d) => playAgain(d))} />}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+      <Ticker items={s.headlines} />
+      <p className="py-1.5 text-center text-[11px] text-muted">Fictional money only. No deposits, no withdrawals, no real wagering. Nothing here is financial advice.</p>
+    </div>
+  );
+}
+
+function Lobby({ s, joinUrl, mode, addBot, commit }: { s: GameState; joinUrl: string; mode: string; addBot: () => void; commit: ReturnType<typeof useHost>["commit"] }) {
+  const seg = (vals: number[], cur: number, set: (v: number) => void, fmt: (v: number) => string) => (
+    <div className="flex gap-1">
+      {vals.map((v) => (
+        <button key={v} onClick={() => set(v)} className={`rounded-md px-3 py-1.5 font-mono text-sm ${cur === v ? "bg-ink text-bg" : "bg-card2 text-muted hover:text-ink"}`}>
+          {fmt(v)}
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <div className="grid gap-8 lg:grid-cols-[420px_1fr]">
+      <section className="rounded-2xl border border-line bg-card p-6 text-center">
+        <p className="font-mono text-xs tracking-widest text-muted">SCAN TO JOIN · OR GO TO</p>
+        <p className="mt-1 break-all font-mono text-sm text-gold">{joinUrl.replace(/^https?:\/\//, "")}</p>
+        <div className="mx-auto my-5 w-fit rounded-xl bg-ink p-3">
+          <QRCodeSVG value={joinUrl} size={220} />
+        </div>
+        <p className="font-mono text-xs text-muted">ROOM CODE</p>
+        <p className="num text-6xl font-bold tracking-[0.3em]">{s.code}</p>
+        {mode === "local" && (
+          <div className="mt-4 rounded-lg bg-gold/10 p-3 text-left text-sm text-gold">
+            Demo mode: phones can&apos;t reach this room. Open player tabs in this same browser, or add bots.{" "}
+            {!liveAvailable && "Add Supabase keys to play on real phones."}
+            <a href={joinUrl} target="_blank" className="mt-2 flex items-center gap-1 font-semibold underline">
+              <ExternalLink className="size-4" /> Open a player tab
+            </a>
+          </div>
+        )}
+      </section>
+      <section>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="font-display text-5xl tracking-wide">TRADING FLOOR</h1>
+            <p className="text-muted">
+              {s.players.length} trader{s.players.length === 1 ? "" : "s"} · everyone starts with $1,000 · need 2+ to ring the bell
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={addBot} className="flex items-center gap-1.5 rounded-lg border border-line bg-card px-4 py-2.5 text-sm hover:bg-card2">
+              <Bot className="size-4" /> Add bot
+            </button>
+            <button
+              disabled={s.players.length < 2}
+              onClick={() => commit((d, t) => startGame(d, t))}
+              className="flex items-center gap-1.5 rounded-lg bg-yes px-5 py-2.5 font-bold text-bg disabled:opacity-40"
+            >
+              <Play className="size-4 fill-bg" /> Ring the opening bell
+            </button>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-6 rounded-xl border border-line bg-card p-4">
+          <label className="space-y-1.5">
+            <span className="block font-mono text-xs text-muted">ROUNDS</span>
+            {seg([4, 6, 8, 12], s.settings.rounds, (v) => commit((d) => updateSettings(d, { rounds: v })), String)}
+          </label>
+          <label className="space-y-1.5">
+            <span className="block font-mono text-xs text-muted">TRADING WINDOW</span>
+            {seg([25, 40, 60], s.settings.tradingSeconds, (v) => commit((d) => updateSettings(d, { tradingSeconds: v })), (v) => `${v}s`)}
+          </label>
+          <div className="space-y-1.5">
+            <span className="block font-mono text-xs text-muted">CUSTOM CARDS</span>
+            <span className="num text-lg">{s.customCards.length}</span>
+            <span className="ml-1 text-xs text-muted">submitted from phones</span>
+          </div>
+        </div>
+        <ul className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <AnimatePresence>
+            {s.players.map((p) => (
+              <motion.li key={p.id} layout initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }} className="flex items-center gap-3 rounded-xl border border-line bg-card p-3">
+                <Avatar p={p} size={42} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-semibold">{p.name}</div>
+                  <div className="num text-xs text-yes">{money(p.cash)}</div>
+                </div>
+                {p.isBot && <span className="font-mono text-[10px] text-muted">BOT</span>}
+                <button aria-label={`Remove ${p.name}`} onClick={() => commit((d) => removePlayer(d, p.id))} className="text-muted hover:text-no">
+                  <X className="size-4" />
+                </button>
+              </motion.li>
+            ))}
+          </AnimatePresence>
+          {s.players.length === 0 && <li className="col-span-full rounded-xl border border-dashed border-line p-10 text-center text-muted">Waiting for traders. Scan the code with your phone.</li>}
+        </ul>
+        <div className="mt-6 grid gap-3 text-sm text-muted sm:grid-cols-3">
+          <p>
+            <b className="text-ink">1. IPO.</b> Each round, one player gets a truth or a dare. It becomes a YES/NO market.
+          </p>
+          <p>
+            <b className="text-ink">2. Trade.</b> Buy YES or NO on your phone. Prices move as people bet. Shares pay $1 if right.
+          </p>
+          <p>
+            <b className="text-ink">3. Settle.</b> They answer or perform, the jury votes, and the market pays out. Richest at the bell wins.
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Final({ s, again }: { s: GameState; again: () => void }) {
+  const sorted = [...s.players].sort((a, b) => b.cash - a.cash);
+  const podium = sorted.slice(0, 3);
+  return (
+    <div className="mx-auto max-w-5xl text-center">
+      <p className="font-mono text-sm tracking-widest text-gold">🔔 CLOSING BELL</p>
+      <h1 className="font-display text-6xl tracking-wide sm:text-7xl">{podium[0]?.name.toUpperCase()} WINS DARE STREET</h1>
+      <div className="mt-8 flex items-end justify-center gap-4">
+        {[podium[1], podium[0], podium[2]].map((p, i) =>
+          p ? (
+            <motion.div key={p.id} initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 * i }} className="w-36">
+              <Avatar p={p} size={i === 1 ? 84 : 60} />
+              <div className="mt-2 truncate font-semibold">{p.name}</div>
+              <div className="num text-yes">{money(p.cash)}</div>
+              <div className={`mt-2 rounded-t-lg bg-card2 ${i === 1 ? "h-32" : i === 0 ? "h-20" : "h-14"} flex items-start justify-center pt-2 font-display text-3xl`}>{i === 1 ? 1 : i === 0 ? 2 : 3}</div>
+            </motion.div>
+          ) : null,
+        )}
+      </div>
+      <div className="mt-10 grid gap-3 text-left sm:grid-cols-2 lg:grid-cols-4">
+        {s.awards.map((a) => {
+          const p = playerById(s, a.playerId);
+          return (
+            <div key={a.id} className="rounded-xl border border-line bg-card p-4">
+              <div className="text-3xl">{a.emoji}</div>
+              <div className="mt-1 font-bold">{a.title}</div>
+              <div className="mt-1 flex items-center gap-2">
+                <Avatar p={p} size={22} /> <span className="truncate">{p?.name}</span>
+              </div>
+              <div className="mt-1 text-xs text-muted">{a.detail}</div>
+            </div>
+          );
+        })}
+      </div>
+      <button onClick={again} className="mt-10 inline-flex items-center gap-2 rounded-lg bg-yes px-6 py-3 font-bold text-bg">
+        <RotateCcw className="size-4" /> Run it back (same players)
+      </button>
+    </div>
+  );
+}
