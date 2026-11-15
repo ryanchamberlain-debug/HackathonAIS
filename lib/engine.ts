@@ -15,7 +15,7 @@ import type {
   Player,
   PlayerAction,
   PlayerStats,
-  Side,
+  Outcome,
 } from "./types";
 import { CHICKEN_TAX, STARTING_CASH } from "./types";
 
@@ -220,41 +220,30 @@ function closeTrading(s: GameState, now: number) {
   m.closedAt = now;
   m.history.push({ t: now - (m.openedAt ?? now), yes: currentYes(m) });
   s.phase = "performing";
-  if (m.card.kind === "dare") s.phaseEndsAt = now + PHASE_MS.performingDare;
-  else s.phaseEndsAt = now + (m.truthLocked ? PHASE_MS.performingTruth : PHASE_MS.truthWait);
+  // No timer: the market stays closed until the host calls the result.
+  s.phaseEndsAt = null;
 }
 
-function startVoting(s: GameState, now: number) {
-  s.phase = "voting";
-  s.phaseEndsAt = now + PHASE_MS.voting;
+/** Host calls the result (same choices as backend RESOLVE_CHALLENGE: YES, NO or VOID). */
+export function hostResolve(s: GameState, outcome: Outcome, now: number) {
+  if (s.phase !== "performing" || !s.market || s.market.result) return;
+  resolve(s, now, outcome);
 }
 
-function resolve(s: GameState, now: number) {
+function resolve(s: GameState, now: number, called: Outcome = "NO") {
   const m = s.market!;
   const subject = playerById(s, m.subjectId);
   const name = subject?.name ?? "Someone";
   const closingYes = currentYes(m);
 
-  let outcome: Side;
+  let outcome: Outcome;
   let reason: string;
-  if (m.card.kind === "truth" && !m.truthLocked) m.chickened = true;
   if (m.chickened) {
     outcome = "NO";
     reason = `${name} chickened out`;
-  } else if (m.card.kind === "truth") {
-    outcome = m.truthAnswer ?? "NO";
-    reason = `${name} answered ${outcome}`;
   } else {
-    const votes = Object.values(m.votes);
-    const legit = votes.filter(Boolean).length;
-    const fraud = votes.length - legit;
-    if (!votes.length) {
-      outcome = m.dareDone ? "YES" : "NO";
-      reason = m.dareDone ? "No jury showed up. Benefit of the doubt." : "Ran out the clock";
-    } else {
-      outcome = legit >= fraud ? "YES" : "NO";
-      reason = `Jury voted ${legit} legit, ${fraud} fraud`;
-    }
+    outcome = called;
+    reason = outcome === "VOID" ? "The host voided this market" : `The host called it ${outcome}`;
   }
 
   // Pari-mutuel settlement, same algorithm as backend resolveChallenge().
@@ -343,7 +332,6 @@ function finish(s: GameState) {
 }
 
 export function advance(s: GameState, now: number) {
-  const m = s.market;
   switch (s.phase) {
     case "intro":
       openTrading(s, now);
@@ -352,9 +340,7 @@ export function advance(s: GameState, now: number) {
       closeTrading(s, now);
       break;
     case "performing":
-      if (!m) break;
-      if (m.card.kind === "dare" && !m.chickened) startVoting(s, now);
-      else resolve(s, now);
+      // Waits for the host to call YES, NO or VOID (hostResolve).
       break;
     case "voting":
       resolve(s, now);
@@ -449,7 +435,6 @@ export function applyAction(s: GameState, pid: string, a: PlayerAction, now: num
     case "dareDone": {
       if (!isSubject || m.card.kind !== "dare" || s.phase !== "performing" || m.chickened) return;
       m.dareDone = true;
-      startVoting(s, now);
       return;
     }
     case "chicken": {

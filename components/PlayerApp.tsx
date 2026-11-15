@@ -108,63 +108,29 @@ function Player({ code, pid }: { code: string; pid: string }) {
                 )}
               </div>
 
-              {isSubject && m.card.kind === "truth" && !m.truthLocked && ["intro", "trading", "performing"].includes(s.phase) && (
-                <div className="rounded-2xl border border-hot/50 bg-hot/10 p-4">
-                  <p className="font-semibold">Lock your secret answer</p>
-                  <p className="mb-3 text-xs text-muted">Only you know it until the reveal. Be honest. The room will judge.</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["YES", "NO"] as Side[]).map((a) => (
-                      <button key={a} onClick={() => act({ t: "truth", answer: a })} className={`rounded-xl py-3 font-bold text-bg ${a === "YES" ? "bg-yes" : "bg-no"}`}>
-                        {a}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {isSubject && m.card.kind === "truth" && m.truthLocked && s.phase !== "voting" && (
-                <p className="rounded-xl bg-card2 p-3 text-center text-sm">🔒 Answer locked. Keep a straight face.</p>
-              )}
-
               {s.phase === "intro" && <p className="py-6 text-center font-display text-3xl tracking-wide text-gold">BETTING OPENS SOON</p>}
               {s.phase === "trading" && <TradePanel s={s} pid={pid} act={act} isSubject={isSubject} />}
 
-              {s.phase === "performing" && isSubject && m.card.kind === "dare" && (
+              {s.phase === "performing" && isSubject && (
                 <div className="space-y-2">
-                  <p className="text-center text-sm text-muted">You&apos;re live. Do the dare, then tap below. The room votes on whether it counts.</p>
-                  <button onClick={() => act({ t: "dareDone" })} className="w-full rounded-xl bg-yes py-5 text-xl font-bold text-bg">
-                    I DID IT
-                  </button>
+                  <p className="text-center text-sm text-muted">
+                    {m.card.kind === "dare" ? "You're live. Do the dare. The host calls whether it counts." : "You're live. Answer out loud. The host calls the result."}
+                  </p>
+                  {m.card.kind === "dare" && (
+                    <button disabled={m.dareDone} onClick={() => act({ t: "dareDone" })} className="w-full rounded-xl bg-yes py-5 text-xl font-bold text-bg disabled:opacity-60">
+                      {m.dareDone ? "Sent. Waiting for the host" : "I did it"}
+                    </button>
+                  )}
                   <button onClick={() => act({ t: "chicken" })} className="w-full rounded-xl border border-no/60 py-3 font-semibold text-no">
-                    🐔 Chicken out (-$100 chicken tax)
+                    🐔 {m.card.kind === "dare" ? "Chicken out" : "Refuse to answer"} (-$100 chicken tax)
                   </button>
                 </div>
               )}
-              {s.phase === "performing" && isSubject && m.card.kind === "truth" && !m.truthLocked && (
-                <button onClick={() => act({ t: "chicken" })} className="w-full rounded-xl border border-no/60 py-3 font-semibold text-no">
-                  🐔 Refuse to answer (-$100 chicken tax)
-                </button>
-              )}
               {s.phase === "performing" && !isSubject && (
                 <p className="rounded-xl bg-no/10 p-4 text-center">
-                  <span className="blink text-no">● LIVE</span> Market closed. Eyes on <b>{subject.name}</b>.
+                  <span className="blink text-no">● Live.</span> Betting is closed. Eyes on <b>{subject.name}</b>. The host calls the result.
                 </p>
               )}
-              {s.phase === "voting" &&
-                (isSubject ? (
-                  <p className="rounded-xl bg-card2 p-4 text-center">⚖️ The jury is deliberating your fate.</p>
-                ) : (
-                  <div>
-                    <p className="mb-2 text-center text-sm text-muted">Did {subject.name} actually do the dare?</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button onClick={() => act({ t: "vote", legit: true })} className={`rounded-xl py-5 text-lg font-bold ${m.votes[pid] === true ? "bg-yes text-bg" : "border border-yes/60 text-yes"}`}>
-                        LEGIT
-                      </button>
-                      <button onClick={() => act({ t: "vote", legit: false })} className={`rounded-xl py-5 text-lg font-bold ${m.votes[pid] === false ? "bg-no text-bg" : "border border-no/60 text-no"}`}>
-                        FRAUD
-                      </button>
-                    </div>
-                  </div>
-                ))}
               {s.phase !== "trading" && s.phase !== "intro" && (
                 <p className="text-center text-sm text-muted">
                   Your position: <PositionLine market={m} pid={pid} />
@@ -175,12 +141,12 @@ function Player({ code, pid }: { code: string; pid: string }) {
           {s.phase === "resolution" && m?.result && (
             <div className="space-y-4 py-4 text-center">
               <p className="text-sm text-muted">Market settled</p>
-              <p className={`font-display text-6xl ${m.result.outcome === "YES" ? "text-yes" : "text-no"}`}>{m.result.outcome}</p>
+              <p className={`font-display text-6xl ${m.result.outcome === "YES" ? "text-yes" : m.result.outcome === "NO" ? "text-no" : "text-muted"}`}>{m.result.outcome}</p>
               <p className="text-sm text-muted">{m.result.reason}</p>
               <div className="rounded-2xl border border-line bg-card p-5">
                 <p className="text-sm text-muted">Your round</p>
                 <PnL value={m.result.pnl[pid] ?? 0} className="text-4xl" />
-                {m.result.refunded && <p className="mt-2 text-sm text-muted">Nobody backed the winning side, so every stake was refunded.</p>}
+                {m.result.refunded && <p className="mt-2 text-sm text-muted">{m.result.outcome === "VOID" ? "Market voided. Every stake was refunded." : "Nobody backed the winning side, so every stake was refunded."}</p>}
               </div>
               <p className="font-display text-xl leading-snug tracking-wide">{m.result.headline}</p>
             </div>

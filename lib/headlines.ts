@@ -1,11 +1,11 @@
 import { pick } from "./format";
-import type { CardKind, Side } from "./types";
+import type { CardKind, Outcome } from "./types";
 
 export interface HeadlineInput {
   kind: CardKind;
   name: string;
   prompt: string;
-  outcome: Side;
+  outcome: Outcome;
   chickened: boolean;
   closingYes: number;
   topWinner?: string;
@@ -13,6 +13,12 @@ export interface HeadlineInput {
 }
 
 export function templateHeadline(h: HeadlineInput): { headline: string; subhead: string } {
+  if (h.outcome === "VOID") {
+    return {
+      headline: pick([`MARKET ON ${h.name.toUpperCase()} VOIDED. EVERYONE GETS A REFUND.`, `REGULATORS HALT ${h.name.toUpperCase()} MARKET. NO CONTEST.`]),
+      subhead: "The host called it off. Every stake goes back to its owner.",
+    };
+  }
   const odds = Math.round((h.outcome === "YES" ? h.closingYes : 1 - h.closingYes) * 100);
   const upset = odds < 30;
 

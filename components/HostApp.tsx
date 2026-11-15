@@ -6,7 +6,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { use, useEffect, useState } from "react";
 import { browser } from "react-dom";
 import { nextBotProfile } from "@/lib/bots";
-import { MAX_PLAYERS, addPlayer, advance, createGame, endGameNow, playAgain, playerById, removePlayer, startGame, updateSettings } from "@/lib/engine";
+import { MAX_PLAYERS, addPlayer, advance, createGame, hostResolve, endGameNow, playAgain, playerById, removePlayer, startGame, updateSettings } from "@/lib/engine";
 import { money, roomCode, uid } from "@/lib/format";
 import { connectBackend, liveAvailable, loadRoom, netMode, openTransport, useHost, useNow, type Transport } from "@/lib/net";
 import type { GameState } from "@/lib/types";
@@ -97,9 +97,11 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
         <div className="ml-auto flex items-center gap-2">
           {s.phase !== "lobby" && s.phase !== "final" && (
             <>
-              <button onClick={() => commit((d, t) => advance(d, t))} className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-card">
-                <FastForward className="size-4" /> Skip
-              </button>
+              {s.phase !== "performing" && (
+                <button onClick={() => commit((d, t) => advance(d, t))} className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-card">
+                  <FastForward className="size-4" /> Skip
+                </button>
+              )}
               <button onClick={() => confirm("End the game now?") && commit((d) => endGameNow(d))} className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm text-no hover:bg-card">
                 <Square className="size-4" /> End
               </button>
@@ -149,28 +151,30 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
                     </>
                   )}
                   {s.phase === "performing" && (
-                    <div className="mt-5 rounded-xl bg-no/10 p-4 text-center text-lg">
-                      <span className="blink text-no">● LIVE</span> Market closed.{" "}
-                      {m.card.kind === "dare" ? (
-                        <>
-                          <b>{subject.name}</b>, perform the dare now. Tap <b>I did it</b> on your phone when finished.
-                        </>
-                      ) : m.truthLocked ? (
-                        <>
-                          <b>{subject.name}</b> has locked an answer. Drumroll… then say it out loud and explain yourself.
-                        </>
-                      ) : (
-                        <>
-                          Waiting for <b>{subject.name}</b> to lock their secret answer…
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {s.phase === "voting" && (
-                    <div className="mt-5 rounded-xl bg-gold/10 p-4 text-center text-lg">
-                      ⚖️ Jury is out. Was that dare <b className="text-yes">legit</b> or <b className="text-no">fraud</b>? Vote on your phones.
-                      <div className="num mt-2 text-sm text-muted">
-                        {Object.keys(m.votes).length}/{s.players.length - 1} votes in
+                    <div className="mt-5 rounded-xl border border-gold/40 bg-gold/5 p-5">
+                      <p className="text-center text-lg">
+                        <span className="blink text-no">● Live.</span> Betting is closed.{" "}
+                        {m.card.kind === "dare" ? (
+                          <>
+                            <b>{subject.name}</b>, do the dare.{m.dareDone && <span className="text-yes"> They say they did it.</span>}
+                          </>
+                        ) : (
+                          <>
+                            <b>{subject.name}</b>, answer out loud.
+                          </>
+                        )}
+                      </p>
+                      <p className="mt-4 text-center text-sm text-muted">Host, call the result:</p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                        <button onClick={() => commit((d, t) => hostResolve(d, "YES", t))} className="rounded-xl bg-yes py-4 text-lg font-bold text-bg">
+                          {m.card.kind === "dare" ? "They did it: YES" : "They said yes: YES"}
+                        </button>
+                        <button onClick={() => commit((d, t) => hostResolve(d, "NO", t))} className="rounded-xl bg-no py-4 text-lg font-bold text-bg">
+                          {m.card.kind === "dare" ? "They didn't: NO" : "They said no: NO"}
+                        </button>
+                        <button onClick={() => commit((d, t) => hostResolve(d, "VOID", t))} className="rounded-xl border border-line py-4 text-lg font-semibold text-muted hover:text-ink">
+                          Void and refund everyone
+                        </button>
                       </div>
                     </div>
                   )}
@@ -193,18 +197,18 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
                 <div className="relative">
                   <h1 className="font-display text-4xl leading-tight tracking-wide sm:text-6xl">{m.result.headline}</h1>
                   <div className="absolute -right-2 -top-10 sm:-right-10">
-                    <Stamp text={m.result.chickened ? "BAWK" : m.result.outcome === "YES" ? "DID IT" : "REKT"} tone={m.result.outcome === "YES" ? "yes" : "no"} />
+                    <Stamp text={m.result.chickened ? "BAWK" : m.result.outcome === "VOID" ? "VOID" : m.result.outcome === "YES" ? "DID IT" : "REKT"} tone={m.result.outcome === "YES" ? "yes" : "no"} />
                   </div>
                 </div>
                 <p className="mt-4 text-lg text-muted">{m.result.subhead}</p>
                 <div className="mt-8 inline-flex items-center gap-4 rounded-2xl border border-line bg-card px-6 py-4">
                   <span className="text-muted">Market resolved</span>
-                  <span className={`font-display text-5xl ${m.result.outcome === "YES" ? "text-yes" : "text-no"}`}>{m.result.outcome}</span>
+                  <span className={`font-display text-5xl ${m.result.outcome === "YES" ? "text-yes" : m.result.outcome === "NO" ? "text-no" : "text-muted"}`}>{m.result.outcome}</span>
                   <span className="text-sm text-muted">{m.result.reason}</span>
                 </div>
                 <p className="mt-5 text-lg text-muted">
                   Pot <span className="num text-ink">{money(m.result.totalPool)}</span>
-                  {m.result.refunded ? " · nobody backed the winner, all stakes refunded" : " split among the winners by stake"}
+                  {m.result.outcome === "VOID" ? " refunded to everyone" : m.result.refunded ? ". Nobody backed the winner, so all stakes were refunded" : " split among the winners by stake"}
                 </p>
                 <div className="mx-auto mt-8 grid max-w-3xl gap-2 sm:grid-cols-2">
                   {Object.entries(m.result.pnl)

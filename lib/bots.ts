@@ -43,9 +43,6 @@ export function botActions(s: GameState, now: number): { pid: string; a: PlayerA
     const isSubject = m.subjectId === bot.id;
 
     if (s.phase === "trading") {
-      if (isSubject && m.card.kind === "truth" && !m.truthLocked && Math.random() < 0.35) {
-        out.push({ pid: bot.id, a: { t: "truth", answer: Math.random() < 0.5 ? "YES" : "NO" } });
-      }
       if (isSubject || Math.random() > 0.2) continue; // targets can't bet (backend rule)
       // Each bot holds a private belief and backs the side the pot is underrating.
       const belief = 0.15 + hash01(m.id + bot.id) * 0.7;
@@ -53,9 +50,7 @@ export function botActions(s: GameState, now: number): { pid: string; a: PlayerA
       const amount = Math.min(Math.floor(bot.cash), 10 + Math.floor(Math.random() * 11) * 10);
       if (amount >= MIN_BET) out.push({ pid: bot.id, a: { t: "bet", side, amount } });
     } else if (s.phase === "performing" && isSubject) {
-      if (m.card.kind === "truth" && !m.truthLocked) {
-        out.push({ pid: bot.id, a: { t: "truth", answer: Math.random() < 0.5 ? "YES" : "NO" } });
-      } else if (m.card.kind === "dare" && !m.dareDone && now - (m.closedAt ?? now) > 4000) {
+      if (m.card.kind === "dare" && !m.dareDone && !m.chickened && now - (m.closedAt ?? now) > 4000) {
         out.push({ pid: bot.id, a: Math.random() < 0.85 ? { t: "dareDone" } : { t: "chicken" } });
       }
     } else if (s.phase === "voting" && !isSubject && m.votes[bot.id] === undefined && Math.random() < 0.3) {

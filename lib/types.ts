@@ -1,4 +1,6 @@
 export type Side = "YES" | "NO";
+/** What the host can call a market: a side wins, or VOID refunds every stake (backend RESOLVE_CHALLENGE). */
+export type Outcome = Side | "VOID";
 export type CardKind = "truth" | "dare";
 
 export type Phase =
@@ -55,7 +57,7 @@ export interface Card {
 }
 
 export interface MarketResult {
-  outcome: Side;
+  outcome: Outcome;
   chickened: boolean;
   reason: string;
   headline: string;
@@ -94,7 +96,7 @@ export interface MarketSummary {
   subjectId: string;
   question: string;
   prompt: string;
-  outcome: Side;
+  outcome: Outcome;
   closingYes: number;
   headline: string;
   topWinner: { id: string; pnl: number } | null;
