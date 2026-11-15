@@ -6,7 +6,7 @@ import { Check, Plus } from "lucide-react";
 import { use, useEffect, useState } from "react";
 import { browser } from "react-dom";
 import { AVATARS, currentYes, playerById, ranks } from "@/lib/engine";
-import { cents, money, uid } from "@/lib/format";
+import { money, uid } from "@/lib/format";
 import { estimatePayout, MIN_BET, multiplier } from "@/lib/parimutuel";
 import { usePlayer, useNow } from "@/lib/net";
 import type { CardKind, GameState, Side } from "@/lib/types";
@@ -76,8 +76,8 @@ function Player({ code, pid }: { code: string; pid: string }) {
     <Shell code={code} me={me} rank={rank} total={s.players.length}>
       {hostGone && <p className="mb-3 rounded-lg bg-no/15 p-2 text-center text-sm text-no">Lost the host screen. Reconnecting…</p>}
       <div className="mb-3 flex items-center justify-between">
-        <span className="rounded bg-card px-2 py-1 font-mono text-[11px] tracking-widest text-muted">
-          {s.phase === "lobby" ? "PRE-MARKET" : `R${s.round}/${s.settings.rounds} · ${PHASE_LABEL[s.phase]}`}
+        <span className="rounded bg-card px-2 py-1 text-xs text-muted">
+          {s.phase === "lobby" ? "Waiting room" : `Round ${s.round} of ${s.settings.rounds}: ${PHASE_LABEL[s.phase]}`}
         </span>
         <Countdown endsAt={s.phaseEndsAt} offset={offset} now={now} />
       </div>
@@ -98,8 +98,8 @@ function Player({ code, pid }: { code: string; pid: string }) {
                   <div className="mt-3">
                     <OddsBar yes={currentYes(m)} />
                     <div className="mt-1 flex justify-between font-mono text-xs">
-                      <span className="text-yes">YES {cents(currentYes(m))}</span>
-                      <span className="text-no">NO {cents(1 - currentYes(m))}</span>
+                      <span className="text-yes">YES {Math.round(currentYes(m) * 100)}%</span>
+                      <span className="text-no">NO {Math.round((1 - currentYes(m)) * 100)}%</span>
                     </div>
                   </div>
                 )}
@@ -122,7 +122,7 @@ function Player({ code, pid }: { code: string; pid: string }) {
                 <p className="rounded-xl bg-card2 p-3 text-center text-sm">🔒 Answer locked. Keep a straight face.</p>
               )}
 
-              {s.phase === "intro" && <p className="py-6 text-center font-display text-3xl tracking-wide text-gold">TRADING OPENS SOON</p>}
+              {s.phase === "intro" && <p className="py-6 text-center font-display text-3xl tracking-wide text-gold">BETTING OPENS SOON</p>}
               {s.phase === "trading" && <TradePanel s={s} pid={pid} act={act} isSubject={isSubject} />}
 
               {s.phase === "performing" && isSubject && m.card.kind === "dare" && (
@@ -171,7 +171,7 @@ function Player({ code, pid }: { code: string; pid: string }) {
           )}
           {s.phase === "resolution" && m?.result && (
             <div className="space-y-4 py-4 text-center">
-              <p className="font-mono text-xs tracking-widest text-muted">MARKET SETTLED</p>
+              <p className="text-sm text-muted">Market settled</p>
               <p className={`font-display text-6xl ${m.result.outcome === "YES" ? "text-yes" : "text-no"}`}>{m.result.outcome}</p>
               <p className="text-sm text-muted">{m.result.reason}</p>
               <div className="rounded-2xl border border-line bg-card p-5">
@@ -200,9 +200,9 @@ function Player({ code, pid }: { code: string; pid: string }) {
           )}
           {s.phase === "final" && (
             <div className="space-y-4 py-6 text-center">
-              <p className="font-mono text-xs tracking-widest text-gold">🔔 CLOSING BELL</p>
+              <p className="text-gold">🔔 Closing bell</p>
               <p className="num text-7xl font-bold">#{rank}</p>
-              <p className="text-lg">{rank === 1 ? "You are the Wolf of Dare Street." : "Better luck next IPO."}</p>
+              <p className="text-lg">{rank === 1 ? "You are the Wolf of Dare Street." : "Better luck next round."}</p>
               <p className="num text-2xl">{money(me.cash)}</p>
               {s.awards
                 .filter((a) => a.playerId === pid)
@@ -229,13 +229,13 @@ function Shell({ code, me, rank, total, children }: { code: string; me?: ReturnT
             <Avatar p={me} size={34} />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold">{me.name}</div>
-              <div className="font-mono text-[11px] text-muted">
-                ROOM {code}
-                {rank ? ` · #${rank}/${total}` : ""}
+              <div className="text-xs text-muted">
+                Room {code}
+                {rank ? `, ranked ${rank} of ${total}` : ""}
               </div>
             </div>
             <div className="text-right">
-              <div className="font-mono text-[10px] text-muted">CASH</div>
+              <div className="text-[11px] text-muted">Cash</div>
               <div className="num text-lg font-bold text-yes">{money(me.cash)}</div>
             </div>
           </>
@@ -265,7 +265,7 @@ function JoinForm({ s, onJoin }: { s: GameState; onJoin: (name: string, avatar: 
       <div>
         <h1 className="font-display text-4xl tracking-wide">OPEN AN ACCOUNT</h1>
         <p className="text-sm text-muted">
-          Room <span className="font-mono text-ink">{s.code}</span> · {s.players.length} traders on the floor · $1,000 starting balance
+          Room <span className="font-mono text-ink">{s.code}</span>. {s.players.length} traders already in. You start with $1,000.
         </p>
       </div>
       <input

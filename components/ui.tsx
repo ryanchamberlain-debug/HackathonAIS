@@ -4,7 +4,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, ArrowUp, Minus } from "lucide-react";
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, YAxis } from "recharts";
 import { playerById, stakes } from "@/lib/engine";
-import { cents, money } from "@/lib/format";
+import { odds } from "@/lib/parimutuel";
+import { money } from "@/lib/format";
 import type { GameState, Market, Player } from "@/lib/types";
 
 export function Logo({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
@@ -107,57 +108,105 @@ export function PriceChart({ market, height = 220 }: { market: Market; height?: 
   );
 }
 
-export function Leaderboard({ state, highlight, compact }: { state: GameState; highlight?: string; compact?: boolean }) {
+export function Leaderboard({ state, highlight, compact, limit }: { state: GameState; highlight?: string; compact?: boolean; limit?: number }) {
   const sorted = [...state.players].sort((a, b) => b.cash - a.cash);
+  const shown = limit ? sorted.slice(0, limit) : sorted;
+  const hidden = sorted.length - shown.length;
   return (
-    <ol className="space-y-1.5">
-      <AnimatePresence initial={false}>
-        {sorted.map((p, i) => {
-          const prev = state.prevRanks[p.id];
-          const delta = prev ? prev - (i + 1) : 0;
-          return (
-            <motion.li
-              layout
-              key={p.id}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              className={`flex items-center gap-2.5 rounded-lg border px-2.5 ${compact ? "py-1.5" : "py-2.5"} ${p.id === highlight ? "border-gold/60 bg-gold/10" : "border-line bg-card"}`}
-            >
-              <span className="num w-5 text-right text-xs text-muted">{i + 1}</span>
-              <Avatar p={p} size={compact ? 24 : 32} />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {p.name}
-                {p.isBot && <span className="ml-1 text-[10px] text-muted">BOT</span>}
-              </span>
-              {delta > 0 && <ArrowUp className="size-3.5 text-yes" />}
-              {delta < 0 && <ArrowDown className="size-3.5 text-no" />}
-              {delta === 0 && !compact && <Minus className="size-3.5 text-line" />}
-              <span className="num text-sm font-semibold">{money(p.cash)}</span>
-            </motion.li>
-          );
-        })}
-      </AnimatePresence>
+    <ol className={compact ? "space-y-0.5" : "space-y-1.5"}>
+      {shown.map((p, i) => {
+        const prev = state.prevRanks[p.id];
+        const delta = prev ? prev - (i + 1) : 0;
+        return (
+          <motion.li
+            layout="position"
+            transition={{ type: "spring", stiffness: 260, damping: 30 }}
+            key={p.id}
+            className={`flex items-center gap-2.5 rounded-lg px-2.5 ${compact ? "py-1" : "border py-2.5"} ${
+              p.id === highlight ? "border-gold/60 bg-gold/10" : compact ? "" : "border-line bg-card"
+            }`}
+          >
+            <span className={`num w-5 text-right text-xs ${i === 0 ? "text-gold" : "text-muted"}`}>{i + 1}</span>
+            <Avatar p={p} size={compact ? 22 : 32} />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</span>
+            {delta > 0 && <ArrowUp aria-label="Up" className="size-3.5 text-yes" />}
+            {delta < 0 && <ArrowDown aria-label="Down" className="size-3.5 text-no" />}
+            {delta === 0 && !compact && <Minus className="size-3.5 text-line" />}
+            <span className="num text-sm font-semibold">{money(p.cash)}</span>
+          </motion.li>
+        );
+      })}
+      {hidden > 0 && <li className="px-2.5 pt-1 text-xs text-muted">and {hidden} more on the floor</li>}
     </ol>
+  );
+}
+
+/** The host screen's centerpiece: YES and NO shove each other as the pot shifts. */
+export function TugOfWar({ market }: { market: Market }) {
+  const yes = odds(market.pools).YES;
+  const empty = market.pools.YES + market.pools.NO === 0;
+  const w = Math.min(0.9, Math.max(0.1, yes));
+  return (
+    <div className="relative flex h-44 overflow-hidden rounded-2xl sm:h-52" role="img" aria-label={`YES ${Math.round(yes * 100)} percent, NO ${Math.round((1 - yes) * 100)} percent`}>
+      <motion.div
+        className="flex flex-col justify-between bg-yes p-5 text-bg"
+        animate={{ width: `${w * 100}%` }}
+        transition={{ type: "spring", stiffness: 90, damping: 16 }}
+      >
+        <span className="text-lg font-bold">Yes</span>
+        <div>
+          <div className="font-display text-7xl leading-none sm:text-8xl">{Math.round(yes * 100)}%</div>
+          <div className="num mt-1 text-sm font-semibold opacity-80">{money(market.pools.YES)} in the pool</div>
+        </div>
+      </motion.div>
+      <div className="flex flex-1 flex-col items-end justify-between bg-no p-5 text-right text-bg">
+        <span className="text-lg font-bold">No</span>
+        <div>
+          <div className="font-display text-7xl leading-none sm:text-8xl">{Math.round((1 - yes) * 100)}%</div>
+          <div className="num mt-1 text-sm font-semibold opacity-80">{money(market.pools.NO)} in the pool</div>
+        </div>
+      </div>
+      <div className="pointer-events-none absolute inset-y-0 w-1 bg-bg/80" style={{ left: `calc(${w * 100}% - 2px)` }} />
+      {empty && (
+        <div className="absolute inset-0 flex items-center justify-center bg-bg/60">
+          <span className="-rotate-2 rounded-md bg-gold px-3 py-1 font-marker text-2xl text-bg">empty pot. first bet sets the odds</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Marker-pen graffiti stamped onto the settlement headline. */
+export function Stamp({ text, tone }: { text: string; tone: "yes" | "no" }) {
+  return (
+    <motion.span
+      initial={{ scale: 2.4, rotate: -24, opacity: 0 }}
+      animate={{ scale: 1, rotate: -9, opacity: 1 }}
+      transition={{ type: "spring", stiffness: 420, damping: 14, delay: 0.35 }}
+      className={`inline-block rounded-lg border-4 px-4 py-1 font-marker text-4xl sm:text-5xl ${tone === "yes" ? "border-yes text-yes" : "border-no text-no"}`}
+    >
+      {text}
+    </motion.span>
   );
 }
 
 export function TradeFeed({ state, limit = 8 }: { state: GameState; limit?: number }) {
   const trades = [...(state.market?.trades ?? [])].reverse().slice(0, limit);
-  if (!trades.length) return <p className="py-6 text-center text-sm text-muted">No trades yet. Somebody be brave.</p>;
+  if (!trades.length) return <p className="py-6 text-center text-sm text-muted">No bets yet. The first one sets the odds.</p>;
   return (
     <ul className="space-y-1">
       <AnimatePresence initial={false}>
         {trades.map((t) => {
           const p = playerById(state, t.playerId);
           return (
-            <motion.li key={t.id} layout initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 text-sm">
+            <motion.li key={t.id} initial={{ opacity: 0, backgroundColor: "rgba(255,181,71,0.25)" }} animate={{ opacity: 1, backgroundColor: "rgba(255,181,71,0)" }} transition={{ duration: 0.8 }} className="flex items-center gap-2 rounded px-1 text-sm">
               <Avatar p={p} size={20} />
               <span className="truncate font-medium">{p?.name}</span>
               <span className="text-muted">bet</span>
               <span className={`num font-semibold ${t.side === "YES" ? "text-yes" : "text-no"}`}>
                 {money(t.amount)} {t.side}
               </span>
-              <span className="num ml-auto text-xs text-muted">{cents(t.priceAfter)}</span>
+              <span className="num ml-auto text-xs text-muted" title="YES odds after this bet">{Math.round(t.priceAfter * 100)}%</span>
             </motion.li>
           );
         })}
@@ -191,13 +240,13 @@ export function KindBadge({ kind }: { kind: "truth" | "dare" }) {
 }
 
 export const PHASE_LABEL: Record<string, string> = {
-  lobby: "PRE-MARKET",
-  intro: "NEW IPO",
-  trading: "MARKET OPEN",
-  performing: "LIVE",
-  voting: "JURY VOTING",
-  resolution: "SETTLED",
-  event: "BREAKING",
-  leaderboard: "STANDINGS",
-  final: "CLOSING BELL",
+  lobby: "Waiting room",
+  intro: "New market",
+  trading: "Betting open",
+  performing: "Live",
+  voting: "Jury vote",
+  resolution: "Settled",
+  event: "Breaking",
+  leaderboard: "Standings",
+  final: "Closing bell",
 };

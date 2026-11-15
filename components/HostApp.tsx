@@ -6,11 +6,11 @@ import { QRCodeSVG } from "qrcode.react";
 import { use, useEffect, useState } from "react";
 import { browser } from "react-dom";
 import { nextBotProfile } from "@/lib/bots";
-import { MAX_PLAYERS, addPlayer, advance, createGame, currentYes, endGameNow, playAgain, playerById, removePlayer, startGame, updateSettings } from "@/lib/engine";
-import { cents, money, roomCode, uid } from "@/lib/format";
+import { MAX_PLAYERS, addPlayer, advance, createGame, endGameNow, playAgain, playerById, removePlayer, startGame, updateSettings } from "@/lib/engine";
+import { money, roomCode, uid } from "@/lib/format";
 import { connectBackend, liveAvailable, loadRoom, netMode, openTransport, useHost, useNow, type Transport } from "@/lib/net";
 import type { GameState } from "@/lib/types";
-import { Avatar, Countdown, KindBadge, Leaderboard, Logo, OddsBar, PHASE_LABEL, PnL, PriceChart, Sticker, Ticker, TradeFeed } from "./ui";
+import { Avatar, Countdown, KindBadge, Leaderboard, Logo, PHASE_LABEL, PnL, PriceChart, Stamp, Sticker, Ticker, TradeFeed, TugOfWar } from "./ui";
 
 export default function HostApp() {
   use(browser("The host screen keeps game state in this browser."));
@@ -75,15 +75,15 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
       <header className="flex flex-wrap items-center gap-4 border-b border-line bg-bg/90 px-5 py-3">
         <Logo size="sm" />
         <span className="rounded bg-card px-2 py-1 font-mono text-xs text-muted">
-          ROOM <span className="text-ink">{s.code}</span>
+          Room <span className="text-ink">{s.code}</span>
         </span>
         <span className={`rounded px-2 py-1 font-mono text-xs ${mode !== "local" ? "bg-yes/15 text-yes" : "bg-gold/15 text-gold"}`}>
-          {mode === "backend" ? "● LIVE · GAME SERVER" : mode === "live" ? "● LIVE · SUPABASE" : "● DEMO MODE (THIS BROWSER)"}
+          {mode === "local" ? "Demo: this browser only" : "Live: phones can join"}
         </span>
         {s.phase !== "lobby" && (
           <>
             <span className="font-mono text-xs text-muted">
-              ROUND <span className="text-ink">{s.round}/{s.settings.rounds}</span>
+              Round <span className="text-ink">{s.round} of {s.settings.rounds}</span>
             </span>
             <span className="rounded bg-no/15 px-2 py-1 font-mono text-xs font-bold text-no">
               {s.phase === "performing" ? <span className="blink">● </span> : null}
@@ -127,31 +127,20 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
                   <blockquote className="mb-5 rounded-xl border-l-4 border-gold bg-bg/60 p-4 text-xl leading-snug">{m.card.text}</blockquote>
                   {s.phase === "intro" ? (
                     <div className="py-10 text-center">
-                      <p className="font-display text-5xl tracking-wide text-gold">NEW IPO INCOMING</p>
-                      <p className="mt-3 text-muted">Trading opens in a few seconds. Get your phones out.</p>
+                      <p className="font-display text-5xl tracking-wide text-gold">NEW MARKET INCOMING</p>
+                      <p className="mt-3 text-muted">Betting opens in a few seconds. Phones out.</p>
                     </div>
                   ) : (
                     <>
-                      <div className="mb-3 flex items-end gap-6">
-                        <div>
-                          <div className="text-xs text-muted">YES</div>
-                          <div className="num text-5xl font-bold text-yes">{Math.round(currentYes(m) * 100)}%</div>
-                          <div className="num text-xs text-muted">pool {money(m.pools.YES)}</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-muted">NO</div>
-                          <div className="num text-5xl font-bold text-no">{Math.round((1 - currentYes(m)) * 100)}%</div>
-                          <div className="num text-xs text-muted">pool {money(m.pools.NO)}</div>
-                        </div>
-                        <div className="ml-auto text-right text-sm text-muted">
-                          Pot <span className="num text-ink">{money(m.trades.reduce((a, t) => a + t.amount, 0))}</span>
-                          <br />
-                          Bets <span className="num text-ink">{m.trades.length}</span>
-                        </div>
+                      <TugOfWar market={m} />
+                      <div className="mt-3 flex justify-between text-sm text-muted">
+                        <span>
+                          Pot <span className="num text-ink">{money(m.pools.YES + m.pools.NO)}</span> from <span className="num text-ink">{m.trades.length}</span> bets
+                        </span>
+                        <span>Winners split the whole pot</span>
                       </div>
-                      <OddsBar yes={currentYes(m)} />
                       <div className="mt-4">
-                        <PriceChart market={m} height={260} />
+                        <PriceChart market={m} height={150} />
                       </div>
                     </>
                   )}
@@ -184,12 +173,12 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
                 </section>
                 <aside className="space-y-5">
                   <div className="rounded-2xl border border-line bg-card p-4">
-                    <h2 className="mb-3 font-mono text-xs tracking-widest text-muted">ORDER FLOW</h2>
+                    <h2 className="mb-3 text-sm font-semibold text-muted">Live bets</h2>
                     <TradeFeed state={s} limit={9} />
                   </div>
                   <div className="rounded-2xl border border-line bg-card p-4">
-                    <h2 className="mb-3 font-mono text-xs tracking-widest text-muted">PORTFOLIOS</h2>
-                    <Leaderboard state={s} compact />
+                    <h2 className="mb-2 text-sm font-semibold text-muted">Richest on the floor</h2>
+                    <Leaderboard state={s} compact limit={8} />
                   </div>
                 </aside>
               </div>
@@ -197,7 +186,12 @@ function HostScreen({ initial, transport }: { initial: GameState; transport: Tra
             {s.phase === "resolution" && m?.result && subject && (
               <div className="mx-auto max-w-4xl text-center">
                 <div className="mb-3 inline-block bg-no px-3 py-1 font-display text-xl tracking-widest">BREAKING NEWS</div>
-                <h1 className="font-display text-4xl leading-tight tracking-wide sm:text-6xl">{m.result.headline}</h1>
+                <div className="relative">
+                  <h1 className="font-display text-4xl leading-tight tracking-wide sm:text-6xl">{m.result.headline}</h1>
+                  <div className="absolute -right-2 -top-10 sm:-right-10">
+                    <Stamp text={m.result.chickened ? "BAWK" : m.result.outcome === "YES" ? "DID IT" : "REKT"} tone={m.result.outcome === "YES" ? "yes" : "no"} />
+                  </div>
+                </div>
                 <p className="mt-4 text-lg text-muted">{m.result.subhead}</p>
                 <div className="mt-8 inline-flex items-center gap-4 rounded-2xl border border-line bg-card px-6 py-4">
                   <span className="text-muted">Market resolved</span>
@@ -267,12 +261,12 @@ function Lobby({ s, joinUrl, mode, addBot, addCrew, commit }: { s: GameState; jo
   return (
     <div className="grid gap-8 lg:grid-cols-[420px_1fr]">
       <section className="rounded-2xl border border-line bg-card p-6 text-center">
-        <p className="font-mono text-xs tracking-widest text-muted">SCAN TO JOIN · OR GO TO</p>
+        <p className="text-sm text-muted">Scan to join, or go to</p>
         <p className="mt-1 break-all font-mono text-sm text-gold">{joinUrl.replace(/^https?:\/\//, "")}</p>
         <div className="mx-auto my-5 w-fit rounded-xl bg-ink p-3">
           <QRCodeSVG value={joinUrl} size={220} />
         </div>
-        <p className="font-mono text-xs text-muted">ROOM CODE</p>
+        <p className="text-sm text-muted">Room code</p>
         <p className="num text-6xl font-bold tracking-[0.3em]">{s.code}</p>
         {mode === "local" && (
           <div className="mt-4 rounded-lg bg-gold/10 p-3 text-left text-sm text-gold">
@@ -289,7 +283,7 @@ function Lobby({ s, joinUrl, mode, addBot, addCrew, commit }: { s: GameState; jo
           <div>
             <h1 className="font-display text-5xl tracking-wide">TRADING FLOOR</h1>
             <p className="text-muted">
-              {s.players.length} trader{s.players.length === 1 ? "" : "s"} · everyone starts with $1,000 · need 2+ to ring the bell
+              {s.players.length} trader{s.players.length === 1 ? "" : "s"} in. Everyone starts with $1,000. You need at least 2 to start.
             </p>
           </div>
           <div className="flex gap-2">
@@ -310,17 +304,17 @@ function Lobby({ s, joinUrl, mode, addBot, addCrew, commit }: { s: GameState; jo
         </div>
         <div className="mt-5 flex flex-wrap gap-6 rounded-xl border border-line bg-card p-4">
           <label className="space-y-1.5">
-            <span className="block font-mono text-xs text-muted">ROUNDS</span>
+            <span className="block text-xs text-muted">Rounds</span>
             {seg([4, 6, 8, 12], s.settings.rounds, (v) => commit((d) => updateSettings(d, { rounds: v })), String)}
           </label>
           <label className="space-y-1.5">
-            <span className="block font-mono text-xs text-muted">TRADING WINDOW</span>
+            <span className="block text-xs text-muted">Betting window</span>
             {seg([25, 40, 60], s.settings.tradingSeconds, (v) => commit((d) => updateSettings(d, { tradingSeconds: v })), (v) => `${v}s`)}
           </label>
           <div className="space-y-1.5">
-            <span className="block font-mono text-xs text-muted">CUSTOM CARDS</span>
+            <span className="block text-xs text-muted">Cards from phones</span>
             <span className="num text-lg">{s.customCards.length}</span>
-            <span className="ml-1 text-xs text-muted">submitted from phones</span>
+            
           </div>
         </div>
         <ul className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -362,7 +356,7 @@ function Final({ s, again }: { s: GameState; again: () => void }) {
   const podium = sorted.slice(0, 3);
   return (
     <div className="mx-auto max-w-5xl text-center">
-      <p className="font-mono text-sm tracking-widest text-gold">🔔 CLOSING BELL</p>
+      <p className="text-lg text-gold">🔔 Closing bell</p>
       <h1 className="font-display text-6xl tracking-wide sm:text-7xl">{podium[0]?.name.toUpperCase()} WINS DARE STREET</h1>
       <div className="mt-8 flex items-end justify-center gap-4">
         {[podium[1], podium[0], podium[2]].map((p, i) =>
